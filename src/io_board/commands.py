@@ -50,14 +50,23 @@ async def _send_command(
     with PerformanceLogger(logger, "command", cmd=f"{command.value}{subcommand}"):
         # Build request message
         request_message = build_request(command.value, subcommand, data)
-        
-        # Send and receive via serial
-        response_message = await fetch(request_message)
-        
-        # Parse response
-        response = parse_response(response_message)
-        
-        return response
+
+        while True:
+            # Send and receive via serial
+            response_message = await fetch(request_message)
+            
+            # Parse response
+            response = parse_response(response_message)
+
+            if response.COMMAND != command.value or response.SUBCOMMAND != subcommand:
+                logger.warning(
+                    f"Unexpected response CMD/SUBCMD: "
+                    f"expected {command.value}/{subcommand}, "
+                    f"got {response.COMMAND}/{response.SUBCOMMAND}. Retrying..."
+                )
+                continue  # Retry on unexpected response
+            
+            return response
 
 
 async def initialize() -> None:
