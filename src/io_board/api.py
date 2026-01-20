@@ -636,6 +636,7 @@ async def handle_stream_loadcells(request: Request) -> StreamingResponse:
         },
         422: {"model": StandardErrorResponse, "description": "Invalid parameters"},
     },
+    response_model=None,
     summary="Unified SSE stream for loadcells and door status",
     description="""Server-Sent Events stream with configurable data sources and filtering.
     
@@ -709,7 +710,7 @@ async def handle_unified_sse(
         description="Apply threshold to raw or filtered values",
         example="filtered"
     ),
-) -> StreamingResponse:
+) -> JSONResponse | StreamingResponse:
     """
     Unified SSE endpoint for streaming loadcell and door status.
     
@@ -1135,6 +1136,8 @@ async def handle_unified_sse(
         async def poll_loadcells():
             """Poll loadcell data and generate events."""
             nonlocal detector
+            if not detector:
+                return
             while not stop_flag.is_set():
                 if await request.is_disconnected():
                     break

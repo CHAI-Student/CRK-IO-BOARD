@@ -323,7 +323,7 @@ class LoadcellChangeEvent(BaseModel):
         description="Absolute change amounts for changed loadcells",
         examples=[[5.0, 9.0, 9.0]]
     )
-    threshold: float = Field(
+    threshold: float | List[float] = Field(
         ...,
         description="Threshold value that was exceeded",
         examples=[5.0]
