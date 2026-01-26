@@ -7,10 +7,11 @@ It loads configuration, sets up logging, and starts the FastAPI server.
 
 import asyncio
 
-from io_board.api import serve_api
+from io_board.api.main import serve_api
 from io_board.config import load_config
 from io_board.logging_config import setup_logging, get_logger
 from io_board.serial_io import configure_serial
+from io_board.stream import data_sources, polling_service, stream_queues
 
 
 async def main() -> None:
@@ -40,16 +41,40 @@ async def main() -> None:
     
     # Configure serial communication
     configure_serial(config.serial)
-    
+
+    loadcells_data_source = data_sources.LoadCellsDataSource()
+    loadcells_polling_service = polling_service.PollingService(
+        data_source=loadcells_data_source,
+        interval=config.stream.loadcell_poll_interval,
+        name="LoadCells",
+    )
+    io_status_data_source = data_sources.IOStatusDataSource()
+    io_status_polling_service = polling_service.PollingService(
+        data_source=io_status_data_source,
+        interval=config.stream.io_status_poll_interval,
+        name="IOStatus",
+    )
+
+    polling_services = {
+        "loadcells": loadcells_polling_service,
+        "io_status": io_status_polling_service,
+    }
+
+    # Start polling services
+    await loadcells_polling_service.start()
+    await io_status_polling_service.start()
+
     # Start API server
     try:
-        await serve_api(config.api)
+        await serve_api(config.api, polling_services)
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=e)
         raise
     finally:
+        await loadcells_polling_service.stop()
+        await io_status_polling_service.stop()
         logger.info("IO Board Control Service Stopped")
 
 

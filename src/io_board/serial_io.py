@@ -7,6 +7,7 @@ comprehensive error handling.
 """
 
 import asyncio
+import os
 from typing import Optional
 
 import serial
@@ -56,6 +57,78 @@ def get_serial_config() -> SerialConfig:
             {"reason": "configure_serial() must be called before use"}
         )
     return _serial_config
+
+reader: Optional[asyncio.StreamReader] = None
+writer: Optional[asyncio.StreamWriter] = None
+
+async def get_serial_connection():
+    """
+    Get an asynchronous serial connection using the current configuration.
+    
+    Returns:
+        A tuple of (StreamReader, StreamWriter) for the serial connection.
+        
+    Raises:
+        SerialCommunicationError: If serial not configured or connection fails
+    """
+    global reader, writer
+
+    if reader is not None and writer is not None and not writer.is_closing():
+        return reader, writer
+    
+    # Wait for any existing connection to close
+    if writer is not None:
+        logger.debug("Waiting for existing serial connection to close")
+        await writer.wait_closed()
+        reader = None
+        writer = None
+
+    # Establish new serial connection
+    config = get_serial_config()
+    logger.debug(f"Opening serial port: {config.port} @ {config.baudrate} baud")
+    try:
+        reader, writer = await serial_asyncio.open_serial_connection(
+            url=config.port,
+            baudrate=config.baudrate,
+        )
+
+        # Set low latency mode on POSIX systems if supported
+        if os.name == 'posix':
+            try:
+                serial_instance: serial.Serial = writer.transport.get_extra_info('serial')
+                serial_instance.set_low_latency_mode(True)
+            except NotImplementedError:
+                logger.warning("Low latency mode not supported on this platform/driver")
+
+        return reader, writer
+    except serial.SerialException as e:
+        error_msg = str(e).lower()
+        
+        # Categorize serial errors
+        if "access is denied" in error_msg or "permission" in error_msg:
+            raise SerialCommunicationError(
+                f"Permission denied accessing serial port",
+                ErrorCode.SERIAL_PORT_PERMISSION_DENIED,
+                {"port": config.port}
+            ) from e
+        elif "cannot find" in error_msg or "does not exist" in error_msg:
+            raise SerialCommunicationError(
+                f"Serial port not found",
+                ErrorCode.SERIAL_PORT_NOT_FOUND,
+                {"port": config.port}
+            ) from e
+        elif "busy" in error_msg or "in use" in error_msg:
+            raise SerialCommunicationError(
+                f"Serial port busy or already in use",
+                ErrorCode.SERIAL_PORT_BUSY,
+                {"port": config.port}
+            ) from e
+        else:
+            raise SerialCommunicationError(
+                f"Failed to open serial port",
+                ErrorCode.SERIAL_CONNECTION_FAILED,
+                {"port": config.port, "error": str(e)}
+            ) from e
 
 
 async def _fetch_with_timeout(
@@ -136,41 +209,8 @@ async def fetch(message: bytes) -> bytes:
     
     async with _serial_mutex:
         with PerformanceLogger(logger, "serial_fetch", port=config.port):
-            # Open serial connection
-            try:
-                logger.debug(f"Opening serial port: {config.port} @ {config.baudrate} baud")
-                reader, writer = await serial_asyncio.open_serial_connection(
-                    url=config.port,
-                    baudrate=config.baudrate,
-                )
-            except serial.SerialException as e:
-                error_msg = str(e).lower()
-                
-                # Categorize serial errors
-                if "access is denied" in error_msg or "permission" in error_msg:
-                    raise SerialCommunicationError(
-                        f"Permission denied accessing serial port",
-                        ErrorCode.SERIAL_PORT_PERMISSION_DENIED,
-                        {"port": config.port}
-                    ) from e
-                elif "cannot find" in error_msg or "does not exist" in error_msg:
-                    raise SerialCommunicationError(
-                        f"Serial port not found",
-                        ErrorCode.SERIAL_PORT_NOT_FOUND,
-                        {"port": config.port}
-                    ) from e
-                elif "busy" in error_msg or "in use" in error_msg:
-                    raise SerialCommunicationError(
-                        f"Serial port busy or already in use",
-                        ErrorCode.SERIAL_PORT_BUSY,
-                        {"port": config.port}
-                    ) from e
-                else:
-                    raise SerialCommunicationError(
-                        f"Failed to open serial port",
-                        ErrorCode.SERIAL_CONNECTION_FAILED,
-                        {"port": config.port, "error": str(e)}
-                    ) from e
+            logger.debug(f"Opening serial port: {config.port} @ {config.baudrate} baud")
+            reader, writer = await get_serial_connection()
             
             try:
                 # Retry loop with exponential backoff
@@ -234,4 +274,3 @@ async def fetch(message: bytes) -> bytes:
                 logger.debug("Closing serial port")
                 writer.close()
                 await writer.wait_closed()
-

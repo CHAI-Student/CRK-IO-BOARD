@@ -7,7 +7,6 @@ variables with validation and type safety.
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -59,6 +58,20 @@ class APIConfig:
         if self.stream_interval <= 0:
             raise ValueError(f"Stream interval must be positive, got {self.stream_interval}")
 
+@dataclass(frozen=True)
+class StreamConfig:
+    """Stream configuration settings."""
+    
+    loadcell_poll_interval: float
+    io_status_poll_interval: float
+    
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.loadcell_poll_interval <= 0:
+            raise ValueError(f"Loadcell poll interval must be positive, got {self.loadcell_poll_interval}")
+        if self.io_status_poll_interval <= 0:
+            raise ValueError(f"IO status poll interval must be positive, got {self.io_status_poll_interval}")
+
 
 @dataclass(frozen=True)
 class Config:
@@ -66,7 +79,7 @@ class Config:
     
     serial: SerialConfig
     api: APIConfig
-
+    stream: StreamConfig
 
 def load_config() -> Config:
     """
@@ -91,6 +104,8 @@ def load_config() -> Config:
         IO_BOARD_API_PORT: API server port (default: 8000)
         IO_BOARD_API_LOG_LEVEL: API log level (default: info)
         IO_BOARD_STREAM_INTERVAL: SSE stream update interval in seconds (default: 0.5)
+        IO_BOARD_LOADCELL_POLL_INTERVAL: Loadcell poll interval in seconds (default: 0.5)
+        IO_BOARD_IO_STATUS_POLL_INTERVAL: IO status poll interval in seconds (default: 0.5)
     """
     serial_config = SerialConfig(
         port=os.getenv("IO_BOARD_PORT", "COM3"),
@@ -109,5 +124,10 @@ def load_config() -> Config:
         log_level=os.getenv("IO_BOARD_API_LOG_LEVEL", "info"),
         stream_interval=float(os.getenv("IO_BOARD_STREAM_INTERVAL", "0.5")),
     )
+
+    stream_config = StreamConfig(
+        loadcell_poll_interval=float(os.getenv("IO_BOARD_LOADCELL_POLL_INTERVAL", "0.1")),
+        io_status_poll_interval=float(os.getenv("IO_BOARD_IO_STATUS_POLL_INTERVAL", "0.5")),
+    )
     
-    return Config(serial=serial_config, api=api_config)
+    return Config(serial=serial_config, api=api_config, stream=stream_config)
