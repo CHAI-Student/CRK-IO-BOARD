@@ -37,7 +37,7 @@ router = APIRouter()
                             {
                                 "type": "object",
                                 "title": "loadcell.update",
-                                "description": "Periodic loadcell readings (sent every loadcell_interval seconds)",
+                                "description": "Periodic loadcell readings",
                                 "properties": {
                                     "timestamp": {
                                         "type": "string",
@@ -195,7 +195,7 @@ router = APIRouter()
                             {
                                 "type": "object",
                                 "title": "door.update",
-                                "description": "Periodic door and deadbolt status (sent every door_interval seconds)",
+                                "description": "Periodic door and deadbolt status",
                                 "properties": {
                                     "timestamp": {
                                         "type": "string",
@@ -412,8 +412,8 @@ router = APIRouter()
     - `error`: Stream-level errors
     
     **Example Usage:**
-    - Single stream: `/sse?streams=loadcells&loadcell_interval=0.5`
-    - Dual stream: `/sse?streams=loadcells,doors&loadcell_interval=0.2&door_interval=1.0`
+    - Single stream: `/sse?streams=loadcells`
+    - Dual stream: `/sse?streams=loadcells,doors`
     - With filtering: `/sse?streams=loadcells&filter_method=exponential&filter_alpha=0.3`
     - With thresholds: `/sse?streams=loadcells&threshold=10.0&threshold_scope=filtered`
     """,
@@ -425,20 +425,6 @@ async def handle_unified_sse(
         ...,
         description="Comma-separated list of streams to enable (loadcells, doors)",
         example="loadcells,doors",
-    ),
-    loadcell_interval: float = Query(
-        default=0.5,
-        ge=0.1,
-        le=10.0,
-        description="Polling interval for loadcell updates in seconds (minimum 0.1s)",
-        example=0.5,
-    ),
-    door_interval: float = Query(
-        default=1.0,
-        ge=0.1,
-        le=10.0,
-        description="Polling interval for door status updates in seconds (minimum 0.1s)",
-        example=1.0,
     ),
     filter_method: FilterMethod = Query(
         default=FilterMethod.NONE,
@@ -478,7 +464,7 @@ async def handle_unified_sse(
     """
     Unified SSE endpoint for streaming loadcell and door status.
 
-    Supports multiple concurrent data streams with independent intervals,
+    Supports multiple concurrent data streams,
     configurable filtering, and threshold-based change detection.
     """
     # Parse and validate streams parameter
@@ -562,12 +548,12 @@ async def handle_unified_sse(
 
     logger.info(
         f"Starting unified SSE stream: streams={enabled_streams} "
-        f"loadcell_interval={loadcell_interval} door_interval={door_interval} "
         f"filter_method={filter_method} threshold_scope={threshold_scope}"
     )
 
     async def unified_event_generator():
         """Generate multiplexed SSE events from enabled streams."""
+        nonlocal request
         stop_flag = request.app.state.stop_event
         event_queue = asyncio.Queue()
         tasks = []
@@ -576,8 +562,12 @@ async def handle_unified_sse(
         loadcells_queue = None
         detector = None
         if "loadcells" in enabled_streams:
-            loadcells_queue = stream_queues.Queue() # TODO: Pass actual loadcell queue from commands module
-            await request.app.state.polling_services["loadcells"].subscribe(loadcells_queue)
+            loadcells_queue = (
+                stream_queues.Queue()
+            )  # TODO: Pass actual loadcell queue from commands module
+            await request.app.state.polling_services["loadcells"].subscribe(
+                loadcells_queue
+            )
             detector = LoadcellChangeDetector(
                 filter_method=filter_method,
                 thresholds=threshold_values,
@@ -596,8 +586,12 @@ async def handle_unified_sse(
 
         io_status_queue = None
         if "doors" in enabled_streams:
-            io_status_queue = stream_queues.Queue() # TODO: Pass actual I/O status queue from commands module
-            await request.app.state.polling_services["io_status"].subscribe(io_status_queue)
+            io_status_queue = (
+                stream_queues.Queue()
+            )  # TODO: Pass actual I/O status queue from commands module
+            await request.app.state.polling_services["io_status"].subscribe(
+                io_status_queue
+            )
             poll_doors = make_poll_doors(
                 request,
                 io_status_queue,
@@ -658,7 +652,7 @@ async def handle_unified_sse(
 
 def make_poll_loadcells(
     request: Request,
-    loadcells_queue: asyncio.Queue,
+    loadcells_queue: stream_queues.Queue,
     event_queue: asyncio.Queue,
     detector: LoadcellChangeDetector,
 ):
@@ -768,7 +762,7 @@ def make_poll_loadcells(
 
 def make_poll_doors(
     request: Request,
-    io_status_queue: asyncio.Queue,
+    io_status_queue: stream_queues.Queue,
     event_queue: asyncio.Queue,
 ):
     async def poll_doors():
@@ -776,7 +770,7 @@ def make_poll_doors(
         while not request.app.state.stop_event.is_set():
             if await request.is_disconnected():
                 break
-            
+
             try:
                 io_status: dict[str, str] = await io_status_queue.get()
                 timestamp = datetime.utcnow().isoformat()

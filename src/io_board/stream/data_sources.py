@@ -15,7 +15,7 @@ class DataSourceError:
     error: BaseException
 
 class DataSource:
-    async def fetch(self):
+    async def fetch(self) -> DataSourceResult | DataSourceError:
         raise NotImplementedError("Subclasses must implement this method")
 
 class LoadCellsDataSource(DataSource):

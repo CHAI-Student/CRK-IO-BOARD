@@ -12,10 +12,9 @@ This module provides a RESTful API interface to the IO Board device with:
 import asyncio
 import json
 import signal
-from contextlib import asynccontextmanager, suppress
-from datetime import datetime
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query, Request, status
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError as PydanticValidationError
 from uvicorn.config import Config as UvicornConfig
@@ -36,22 +35,16 @@ from ..io_types import (
     DeadboltRequest,
     DeadboltResponse,
     DoorState,
-    DoorUpdateEvent,
     ErrorItem,
     ErrorListResponse,
     IOStatusResponse,
     LoadCellsResponse,
-    LoadcellChangeEvent,
-    LoadcellUncertaintyEvent,
-    LoadcellUpdateEvent,
     ManufacturingNumberRequest,
     ManufacturingNumberResponse,
     ProductInfoResponse,
     StandardErrorResponse,
     SuccessResponse,
 )
-from ..filters import FilterMethod, ThresholdScope
-from ..events import LoadcellChangeDetector
 
 
 logger = get_logger(__name__)
@@ -96,19 +89,19 @@ app = FastAPI(
 async def logging_middleware(request: Request, call_next):
     """
     Middleware for request/response logging with correlation IDs.
-    
+
     Logs all incoming requests and outgoing responses with timing information
     and correlation IDs for request tracing.
     """
     # Generate correlation ID for this request
     correlation_id = set_correlation_id()
-    
+
     # Log incoming request
     logger.info(
         f"Request started: method={request.method} path={request.url.path} "
         f"client={request.client.host if request.client else 'unknown'}"
     )
-    
+
     # Log request body for POST/PUT/PATCH
     if request.method in ["POST", "PUT", "PATCH"]:
         try:
@@ -117,20 +110,18 @@ async def logging_middleware(request: Request, call_next):
                 logger.debug(f"Request body: {body.decode('utf-8')}")
         except Exception:
             pass
-    
+
     # Process request and measure time
     try:
         with PerformanceLogger(logger, "request", path=request.url.path):
             response = await call_next(request)
-        
+
         # Log response
-        logger.info(
-            f"Request completed: status={response.status_code}"
-        )
-        
+        logger.info(f"Request completed: status={response.status_code}")
+
         # Add correlation ID to response headers
         response.headers["X-Correlation-ID"] = correlation_id
-        
+
         return response
     finally:
         clear_correlation_id()
@@ -140,14 +131,13 @@ async def logging_middleware(request: Request, call_next):
 async def ioboard_error_handler(request: Request, exc: IOBoardError) -> JSONResponse:
     """
     Global exception handler for IO Board errors.
-    
+
     Converts all IOBoardError exceptions to standard JSON error responses.
     """
     logger.error(
-        f"IO Board error: {exc.error_code.value} - {exc.message}",
-        exc_info=exc
+        f"IO Board error: {exc.error_code.value} - {exc.message}", exc_info=exc
     )
-    
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content=exc.to_dict(),
@@ -160,11 +150,11 @@ async def validation_error_handler(
 ) -> JSONResponse:
     """
     Global exception handler for Pydantic validation errors.
-    
+
     Converts validation errors to standard JSON error responses.
     """
     logger.warning(f"Validation error: {exc.errors()}")
-    
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -179,12 +169,12 @@ async def validation_error_handler(
 async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Global exception handler for unexpected errors.
-    
+
     Logs the full exception and returns a generic error response
     without leaking internal details.
     """
     logger.error(f"Unexpected error: {exc}", exc_info=exc)
-    
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -199,7 +189,10 @@ async def generic_error_handler(request: Request, exc: Exception) -> JSONRespons
     "/init",
     response_model=SuccessResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Initialize IO Board",
     description="Initialize the IO Board device. Should be called after device power-on or reset.",
@@ -215,7 +208,10 @@ async def handle_init() -> SuccessResponse:
     "/deadbolt",
     response_model=DeadboltResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Control door deadbolt",
     description="Open or close the door deadbolt lock. Returns the actual state after command execution.",
@@ -224,19 +220,19 @@ async def handle_init() -> SuccessResponse:
 async def handle_deadbolt(request: DeadboltRequest) -> DeadboltResponse:
     """
     Control door deadbolt lock.
-    
+
     Args:
         request: Deadbolt control request with desired state
-        
+
     Returns:
         Current deadbolt state after command execution
     """
     result_state = await commands.set_door_state(request.state)
-    
+
     # Also get full IO status to verify deadbolt state
     io_status = await commands.get_io_status()
     logger.info(f"IO status after deadbolt command: {io_status}")
-    
+
     # Return state based on deadbolt sensor reading
     if "OPEN" in io_status["deadbolt"].upper():
         return DeadboltResponse(state=DoorState.OPEN)
@@ -248,7 +244,10 @@ async def handle_deadbolt(request: DeadboltRequest) -> DeadboltResponse:
     "/calibrate",
     response_model=SuccessResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Calibrate sensors",
     description="Calibrate all loadcell weight sensors. Device should be unloaded before calibration.",
@@ -265,7 +264,10 @@ async def handle_calibrate() -> SuccessResponse:
     response_model=ManufacturingNumberResponse,
     responses={
         422: {"description": "Invalid manufacturing number format"},
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"},
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        },
     },
     summary="Set manufacturing number",
     description="Set the device manufacturing/product ID (11 alphanumeric characters).",
@@ -276,10 +278,10 @@ async def handle_manufacturing_number(
 ) -> ManufacturingNumberResponse:
     """
     Set device manufacturing number.
-    
+
     Args:
         request: Manufacturing number (11 characters)
-        
+
     Returns:
         Manufacturing number as confirmed by device
     """
@@ -291,7 +293,10 @@ async def handle_manufacturing_number(
     "/errors",
     response_model=SuccessResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Clear error log",
     description="Clear all error codes from the device error history.",
@@ -307,7 +312,10 @@ async def handle_clear_errors() -> SuccessResponse:
     "/reboot",
     response_model=SuccessResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Reboot device",
     description="Reboot the IO Board device (hard reboot via relay with timer). Device will be unavailable during restart and may not reply due to power interrupt.",
@@ -323,7 +331,10 @@ async def handle_reboot() -> SuccessResponse:
     "/product_info",
     response_model=ProductInfoResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Get product information",
     description="Retrieve device manufacturing information including product ID and software version.",
@@ -342,7 +353,10 @@ async def handle_product_info() -> ProductInfoResponse:
     "/loadcells",
     response_model=LoadCellsResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Get loadcell readings",
     description="Get current weight readings from all 10 loadcell sensors.",
@@ -358,7 +372,10 @@ async def handle_loadcells() -> LoadCellsResponse:
     "/status",
     response_model=IOStatusResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Get IO status",
     description="Get current status of door and deadbolt sensors.",
@@ -377,7 +394,10 @@ async def handle_status() -> IOStatusResponse:
     "/errors",
     response_model=ErrorListResponse,
     responses={
-        500: {"model": StandardErrorResponse, "description": "Device or communication error"}
+        500: {
+            "model": StandardErrorResponse,
+            "description": "Device or communication error",
+        }
     },
     summary="Get error list",
     description="Retrieve device error history (up to 4 error codes).",
@@ -386,9 +406,7 @@ async def handle_status() -> IOStatusResponse:
 async def handle_errors() -> ErrorListResponse:
     """Get device error history."""
     errors = await commands.get_errors()
-    return ErrorListResponse(
-        errors=[ErrorItem(code=err) for err in errors]
-    )
+    return ErrorListResponse(errors=[ErrorItem(code=err) for err in errors])
 
 
 @app.get(
@@ -407,20 +425,23 @@ async def handle_errors() -> ErrorListResponse:
 async def handle_stream_loadcells(request: Request) -> StreamingResponse:
     """
     Stream loadcell readings via Server-Sent Events.
-    
+
     DEPRECATED: This endpoint is deprecated. Use the unified /sse endpoint instead:
     GET /sse?streams=loadcells&loadcell_interval=0.5
-    
+
     Continuously sends loadcell readings as SSE events. Stream terminates
     when client disconnects or server shuts down.
     """
-    logger.warning("Deprecated endpoint /stream/loadcells accessed. Use /sse?streams=loadcells instead.")
+    logger.warning(
+        "Deprecated endpoint /stream/loadcells accessed. Use /sse?streams=loadcells instead."
+    )
+
     async def event_generator():
         """Generate SSE events with loadcell data."""
         # Get stream interval from app state
         stream_interval = app.state.stream_interval
         stop_flag = app.state.stop_event
-        
+
         logger.info("Started loadcell SSE stream")
         try:
             while not stop_flag.is_set():
@@ -428,7 +449,7 @@ async def handle_stream_loadcells(request: Request) -> StreamingResponse:
                 if await request.is_disconnected():
                     logger.info("Client disconnected from loadcell stream")
                     break
-                
+
                 try:
                     loadcells = await commands.get_loadcells()
                     data = json.dumps({"loadcells": loadcells})
@@ -443,18 +464,22 @@ async def handle_stream_loadcells(request: Request) -> StreamingResponse:
                     logger.warning(f"Error in loadcell stream: {e}")
                 except Exception as e:
                     # Unexpected error - log and send generic error event
-                    logger.error(f"Unexpected error in loadcell stream: {e}", exc_info=e)
-                    error_data = json.dumps({
-                        "error_code": "E9001",
-                        "message": "Stream error occurred",
-                        "details": {}
-                    })
+                    logger.error(
+                        f"Unexpected error in loadcell stream: {e}", exc_info=e
+                    )
+                    error_data = json.dumps(
+                        {
+                            "error_code": "E9001",
+                            "message": "Stream error occurred",
+                            "details": {},
+                        }
+                    )
                     yield f"event: error\ndata: {error_data}\n\n"
-                
+
                 await asyncio.sleep(stream_interval)
         finally:
             logger.info("Loadcell SSE stream ended")
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -464,12 +489,73 @@ async def handle_stream_loadcells(request: Request) -> StreamingResponse:
         },
     )
 
+
 app.include_router(sse.router)
+
+# ============================================================================
+# Graceful Server
+# ============================================================================
+
+
+class GracefulServer(Server):
+    """
+    Uvicorn server with external shutdown event support.
+
+    Extends Uvicorn's Server to monitor an external asyncio.Event for
+    graceful shutdown coordination across multiple services.
+    """
+
+    def __init__(self, config: UvicornConfig, shutdown_event: asyncio.Event):
+        """
+        Initialize graceful server.
+
+        Args:
+            config: Uvicorn server configuration
+            shutdown_event: External shutdown event to monitor
+        """
+        super().__init__(config)
+        self._external_shutdown = shutdown_event
+        self.force_exit = False  # Graceful shutdown, wait for requests
+
+    async def serve(self, sockets=None):
+        """
+        Override serve to monitor external shutdown event.
+
+        Args:
+            sockets: Optional pre-bound sockets
+        """
+        # Start shutdown monitor task
+        monitor_task = asyncio.create_task(self._monitor_shutdown())
+        try:
+            await super().serve(sockets)
+        finally:
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
+
+    async def _monitor_shutdown(self):
+        """Monitor external shutdown event and trigger server shutdown."""
+        await self._external_shutdown.wait()
+        logger.info("External shutdown signal received, stopping API server")
+        self.should_exit = True
+
+    async def shutdown(self, sockets=None):
+        """
+        Override shutdown to set external shutdown event.
+
+        Args:
+            sockets: Optional pre-bound sockets
+        """
+        self._external_shutdown.set()
+        await super().shutdown(sockets)
+
 
 async def serve_api(config: APIConfig, polling_services: dict) -> None:
     """
     Start the FastAPI server.
-    
+
     Args:
         config: API configuration object
         polling_services: Dictionary of polling service instances
@@ -477,33 +563,18 @@ async def serve_api(config: APIConfig, polling_services: dict) -> None:
     # Store config in app state for access by handlers
     app.state.stream_interval = config.stream_interval
     app.state.polling_services = polling_services
-    
+
     logger.info(
         f"Starting API server: host={config.host} port={config.port} "
         f"log_level={config.log_level}"
     )
-    
+
     uvicorn_config = UvicornConfig(
         app=app,
         host=config.host,
         port=config.port,
         log_level=config.log_level,
     )
-    server = Server(uvicorn_config)
-    server.force_exit = True
-    
-    async def watch_for_exit():
-        """Set stop flag when uvicorn begins shutdown."""
-        # Wait until server signals shutdown (SIGINT/SIGTERM sets should_exit)
-        while not server.should_exit:
-            await asyncio.sleep(0.2)
-        stop_event.set()
+    server = GracefulServer(uvicorn_config, stop_event)
 
-    watcher = asyncio.create_task(watch_for_exit())
-    try:
-        await server.serve()
-    finally:
-        watcher.cancel()
-        with suppress(Exception):
-            await watcher
-
+    await server.serve()
