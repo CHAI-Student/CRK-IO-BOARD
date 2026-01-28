@@ -1,0 +1,21 @@
+[project]
+name = "crk-io-board"
+version = "0.1.0"
+description = "IO Board interface for CRK"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "construct>=2.10.0",
+    "fastapi>=0.109.0",
+    "pydantic>=2.5.0",
+    "pyserial>=3.5",
+    "pyserial-asyncio>=0.6",
+    "starlette>=0.50.0",
+    "uvicorn>=0.27.0",
+]
+
+[dependency-groups]
+dev = [
+    "construct-typing>=0.7.0",
+    "pytest>=9.0.2",
+]
