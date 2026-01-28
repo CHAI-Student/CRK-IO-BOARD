@@ -237,17 +237,19 @@ class GracefulServer(Server):
         await super().shutdown(sockets)
 
 
-async def serve_api(config: APIConfig, polling_services: dict) -> None:
+async def serve_api(config: APIConfig, polling_services: dict, recording_services: dict) -> None:
     """
     Start the FastAPI server.
 
     Args:
         config: API configuration object
         polling_services: Dictionary of polling service instances
+        recording_services: Dictionary of recording service instances
     """
     # Store config in app state for access by handlers
     app.state.stream_interval = config.stream_interval
     app.state.polling_services = polling_services
+    app.state.recording_services = recording_services
 
     logger.info(
         f"Starting API server: host={config.host} port={config.port} "

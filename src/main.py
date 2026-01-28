@@ -7,6 +7,7 @@ It loads configuration, sets up logging, and starts the FastAPI server.
 
 import asyncio
 
+from io_board import recording
 from io_board.api.main import serve_api
 from io_board.config import load_config
 from io_board.logging_config import setup_logging, get_logger
@@ -60,19 +61,34 @@ async def main() -> None:
         "io_status": io_status_polling_service,
     }
 
+    loadcells_recording_service = recording.RecordingService(
+        polling_service=loadcells_polling_service,
+        name="LoadCellsRecording",
+    )
+
+    recording_services = {
+        "loadcells": loadcells_recording_service,
+    }
+
     # Start polling services
     await loadcells_polling_service.start()
     await io_status_polling_service.start()
 
+    # Start recording services
+    await loadcells_recording_service.start()
+
     # Start API server
     try:
-        await serve_api(config.api, polling_services)
+        await serve_api(config.api, polling_services, recording_services)
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=e)
         raise
     finally:
+        # Stop recording services
+        await loadcells_recording_service.stop()
+        # Stop polling services
         await loadcells_polling_service.stop()
         await io_status_polling_service.stop()
         logger.info("IO Board Control Service Stopped")
