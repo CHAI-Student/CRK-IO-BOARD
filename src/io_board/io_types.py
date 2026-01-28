@@ -22,7 +22,7 @@ class ManagementSubcommand(str, Enum):
     """Management control subcommands."""
     
     INITIALIZE = "PD"
-    DOOR_CONTROL = "DC"
+    DEADBOLT_CONTROL = "DC"
     CALIBRATE = "LZ"
     WRITE_PRODUCT_ID = "WP"
     CLEAR_ERRORS = "EZ"
@@ -39,87 +39,43 @@ class RequestSubcommand(str, Enum):
 
 
 class DoorState(str, Enum):
-    """Door/deadbolt state values."""
+    """Door state values."""
+
+    OPENED = "OPENED"
+    CLOSED = "CLOSED"
+
+
+class DeadboltState(str, Enum):
+    """Deadbolt state values."""
+
+    OPENED = "OPENED"
+    LOCKED = "LOCKED"
+
+
+class DeadboltAction(str, Enum):
+    """Deadbolt action values."""
     
     OPEN = "OPEN"
     CLOSE = "CLOSE"
 
 
-class DoorStateByte(int, Enum):
-    """Door state byte values for protocol encoding."""
-    
-    OPEN = ord("O")
-    CLOSE = ord("C")
-
-
 # Protocol message structures (for internal use)
 
-class ProtocolHeader(TypedDict):
-    """Protocol message header."""
+
+class ProductInfoData(TypedDict):
+    """Product information response data."""
     
-    COMMAND: str
-    SUBCOMMAND: str
-
-
-class DoorControlData(TypedDict):
-    """Door control command data."""
-    
-    DOOR: Union[DoorStateByte, str]
-
-
-class ProductIDData(TypedDict):
-    """Product ID data."""
-    
-    PRODUCT_ID: str
-
-
-class ManufacturingInfoData(TypedDict):
-    """Manufacturing information response data."""
-    
-    PRODUCT_ID: str
-    SW_VERSION: str
-
-
-class LoadcellsData(TypedDict):
-    """Loadcell readings response data."""
-    
-    LOADCELLS: List[str]
-
+    product_id: str
+    sw_version: str
 
 class IOStatusData(TypedDict):
-    """IO status response data."""
+    """IO Status response data."""
     
-    DOOR: str
-    DEADBOLT: str
-
-
-class ErrorsData(TypedDict):
-    """Error list response data."""
-    
-    ERRORS: List[str]
+    door: DoorState
+    deadbolt: DeadboltState
 
 
 # API request/response models (Pydantic)
-
-class DeadboltRequest(BaseModel):
-    """Request model for deadbolt control."""
-    
-    state: DoorState = Field(
-        ...,
-        description="Desired deadbolt state",
-        examples=["OPEN", "CLOSE"]
-    )
-
-
-class DeadboltResponse(BaseModel):
-    """Response model for deadbolt control."""
-    
-    state: DoorState = Field(
-        ...,
-        description="Current deadbolt state",
-        examples=["OPEN", "CLOSE"]
-    )
-
 
 class ManufacturingNumberRequest(BaseModel):
     """Request model for setting manufacturing number."""
@@ -153,6 +109,16 @@ class ManufacturingNumberResponse(BaseModel):
     )
 
 
+class SoftwareVersionResponse(BaseModel):
+    """Response model for software version."""
+    
+    sw_version: str = Field(
+        ...,
+        description="Software/firmware version",
+        examples=["01", "12"]
+    )
+
+
 class ProductInfoResponse(BaseModel):
     """Response model for product information."""
     
@@ -165,46 +131,6 @@ class ProductInfoResponse(BaseModel):
         ...,
         description="Software/firmware version",
         examples=["01", "12"]
-    )
-
-
-class LoadCellsResponse(BaseModel):
-    """Response model for loadcell readings."""
-    
-    loadcells: List[str] = Field(
-        ...,
-        description="Array of 10 loadcell readings (6 chars each: +/-XXXXX or EEEEEE/VVVVVV for errors)",
-        min_length=10,
-        max_length=10,
-        examples=[["+12345", "-00123", "+99999", "-12345", "+00000", "-00001", "+54321", "-99999", "+11111", "-22222"]]
-    )
-    
-    @field_validator("loadcells")
-    @classmethod
-    def validate_loadcell_format(cls, v: List[str]) -> List[str]:
-        """Validate each loadcell reading is 6 characters."""
-        for reading in v:
-            if len(reading) != 6:
-                raise ValueError(f"Each loadcell reading must be exactly 6 characters, got: {reading}")
-        return v
-
-
-class IOStatusResponse(BaseModel):
-    """Response model for IO status."""
-    
-    door: str = Field(
-        ...,
-        description="Door sensor status (6 characters)",
-        min_length=6,
-        max_length=6,
-        examples=["OPENED", "CLOSED", "ERROR_"]
-    )
-    deadbolt: str = Field(
-        ...,
-        description="Deadbolt sensor status (6 characters)",
-        min_length=6,
-        max_length=6,
-        examples=["OPENED", "CLOSED", "ERROR_"]
     )
 
 

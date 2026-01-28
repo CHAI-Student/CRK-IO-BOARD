@@ -88,8 +88,8 @@ RequestProtocol = Struct(
             # Management Control commands
             "MCPD": Pass,  # Initialize board - no data
             "MCDC": Struct(
-                "DOOR" / Enum(Byte, OPEN=ord("O"), CLOSE=ord("C")),
-            ),  # Door control - OPEN or CLOSE
+                "DEADBOLT" / Enum(Byte, OPEN=ord("O"), CLOSE=ord("C")),
+            ),  # Deadbolt control - OPEN or CLOSE
             "MCLZ": Pass,  # Calibrate - no data
             "MCWP": Struct(
                 "PRODUCT_ID" / PaddedString(11, "ascii"),
@@ -124,7 +124,7 @@ ResponseProtocol = Struct(
             # Management Control responses
             "MCPD": Pass,  # Initialize board - no response data
             "MCDC": Struct(
-                "DOOR" / Enum(Byte, OPEN=ord("O"), CLOSE=ord("C")),
+                "DEADBOLT" / Enum(Byte, OPENED=ord("O"), LOCKED=ord("C")),
             ),  # Door control - returns state
             "MCLZ": Pass,  # Calibrate - no response data
             "MCWP": Struct(

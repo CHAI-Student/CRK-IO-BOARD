@@ -6,19 +6,22 @@ commands from low-level protocol details. All functions include comprehensive
 type hints, docstrings, and error handling.
 """
 
-import asyncio
-from typing import Any, Dict, List
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, List
 
-from .exceptions import DeviceError, ErrorCode
+from .exceptions import DeviceError, ErrorCode, ValidationError
 from .logging_config import PerformanceLogger, get_logger
 from .protocol import build_request, parse_response
 from .serial_io import fetch
 from .io_types import (
     CommandType,
+    DeadboltAction,
+    DeadboltState,
     DoorState,
-    DoorStateByte,
     ManagementSubcommand,
+    ProductInfoData,
     RequestSubcommand,
+    IOStatusData,
 )
 
 logger = get_logger(__name__)
@@ -26,7 +29,7 @@ logger = get_logger(__name__)
 
 async def _send_command(
     command: CommandType,
-    subcommand: str,
+    subcommand: RequestSubcommand | ManagementSubcommand,
     data: Dict[str, Any]
 ) -> Any:
     """
@@ -44,12 +47,19 @@ async def _send_command(
         Parsed response structure
         
     Raises:
+        ValidationError: If command/subcommand types mismatch
         ProtocolError: If protocol building/parsing fails
         SerialCommunicationError: If serial communication fails
     """
-    with PerformanceLogger(logger, "command", cmd=f"{command.value}{subcommand}"):
+    
+    if command == CommandType.MANAGEMENT_CONTROL and not isinstance(subcommand, ManagementSubcommand):
+        raise ValidationError("Mismatched subcommand type for MANAGEMENT_CONTROL command")
+    if command == CommandType.REQUEST and not isinstance(subcommand, RequestSubcommand):
+        raise ValidationError("Mismatched subcommand type for REQUEST command")
+
+    with PerformanceLogger(logger, "command", cmd=f"{command.value}/{subcommand.value}"):
         # Build request message
-        request_message = build_request(command.value, subcommand, data)
+        request_message = build_request(command.value, subcommand.value, data)
 
         while True:
             # Send and receive via serial
@@ -58,15 +68,27 @@ async def _send_command(
             # Parse response
             response = parse_response(response_message)
 
-            if response.COMMAND != command.value or response.SUBCOMMAND != subcommand:
+            # Validate response command and subcommand
+            if response.COMMAND != command.value or response.SUBCOMMAND != subcommand.value:
                 logger.warning(
                     f"Unexpected response CMD/SUBCMD: "
-                    f"expected {command.value}/{subcommand}, "
+                    f"expected {command.value}/{subcommand.value}, "
                     f"got {response.COMMAND}/{response.SUBCOMMAND}. Retrying..."
                 )
                 continue  # Retry on unexpected response
             
             return response
+
+@asynccontextmanager
+async def _session(command: str, **kwargs) -> AsyncIterator[None]:
+    try:
+        yield
+    except DeviceError as e:
+        raise DeviceError(
+            f"Command '{command}' failed"            ,
+            ErrorCode.DEVICE_COMMAND_FAILED,
+            {'command': command} | kwargs
+        ) from e
 
 
 async def initialize() -> None:
@@ -81,28 +103,17 @@ async def initialize() -> None:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.info("Initializing IO Board")
-    try:
+    async with _session('initialize'):
+        logger.info("Initializing IO Board")
         await _send_command(
             CommandType.MANAGEMENT_CONTROL,
-            ManagementSubcommand.INITIALIZE.value,
+            ManagementSubcommand.INITIALIZE,
             {}
         )
-        logger.info("IO Board initialized successfully")
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to initialize IO Board: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Device initialization failed",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "initialize"}
-            ) from e
-        raise
+        logger.info("IO Board initialized")
 
 
-async def set_door_state(state: DoorState) -> DoorState:
+async def set_deadbolt(action: DeadboltAction) -> DeadboltState:
     """
     Control the door lock/deadbolt.
     
@@ -117,31 +128,16 @@ async def set_door_state(state: DoorState) -> DoorState:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.info(f"Setting door state: {state.value}")
-    try:
+    async with _session('set_deadbolt', action=action.value):
+        logger.info(f"Setting deadbolt: {action.value}")
         response = await _send_command(
             CommandType.MANAGEMENT_CONTROL,
-            ManagementSubcommand.DOOR_CONTROL.value,
-            {"DOOR": DoorStateByte[state.value]}
+            ManagementSubcommand.DEADBOLT_CONTROL,
+            {"DEADBOLT": action.value}
         )
-        
-        # Convert response byte back to DoorState
-        door_byte = response.DATA.DOOR
-        result_state = DoorState.OPEN if door_byte == DoorStateByte.OPEN else DoorState.CLOSE
-        
-        logger.info(f"Door state set to: {result_state.value}")
-        return result_state
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to set door state: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                f"Failed to set door state to {state.value}",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "set_door_state", "state": state.value}
-            ) from e
-        raise
+        state = DeadboltState(response.DATA.DEADBOLT)
+        logger.info(f"Deadbolt set: {state.value}")
+        return state
 
 
 async def calibrate() -> None:
@@ -156,25 +152,14 @@ async def calibrate() -> None:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.info("Starting IO Board calibration")
-    try:
+    async with _session('calibrate'):
+        logger.info("Calibrating loadcells")
         await _send_command(
             CommandType.MANAGEMENT_CONTROL,
-            ManagementSubcommand.CALIBRATE.value,
+            ManagementSubcommand.CALIBRATE,
             {}
         )
-        logger.info("IO Board calibration completed")
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to calibrate IO Board: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Device calibration failed",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "calibrate"}
-            ) from e
-        raise
+        logger.info("Loadcells calibrated")
 
 
 async def set_manufacturing_number(manufacturing_number: str) -> str:
@@ -193,28 +178,16 @@ async def set_manufacturing_number(manufacturing_number: str) -> str:
         SerialCommunicationError: If serial communication fails
         ValidationError: If manufacturing number format is invalid
     """
-    logger.info(f"Setting manufacturing number: {manufacturing_number}")
-    try:
+    async with _session('set_manufacturing_number', manufacturing_number=manufacturing_number):
+        logger.info(f"Setting manufacturing number: {manufacturing_number}")
         response = await _send_command(
             CommandType.MANAGEMENT_CONTROL,
-            ManagementSubcommand.WRITE_PRODUCT_ID.value,
+            ManagementSubcommand.WRITE_PRODUCT_ID,
             {"PRODUCT_ID": manufacturing_number}
         )
-        
-        result = response.DATA.PRODUCT_ID
-        logger.info(f"Manufacturing number set: {result}")
-        return result
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to set manufacturing number: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Failed to set manufacturing number",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "set_manufacturing_number", "value": manufacturing_number}
-            ) from e
-        raise
+        manufacturing_number = response.DATA.PRODUCT_ID
+        logger.info(f"Manufacturing number set: {manufacturing_number}")
+        return manufacturing_number
 
 
 async def clear_errors() -> None:
@@ -228,25 +201,14 @@ async def clear_errors() -> None:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.info("Clearing IO Board error log")
-    try:
+    async with _session('clear_errors'):
+        logger.info("Clearing error logs")
         await _send_command(
             CommandType.MANAGEMENT_CONTROL,
-            ManagementSubcommand.CLEAR_ERRORS.value,
+            ManagementSubcommand.CLEAR_ERRORS,
             {}
         )
-        logger.info("IO Board error log cleared")
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to clear error log: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Failed to clear error log",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "clear_errors"}
-            ) from e
-        raise
+        logger.info("Error logs cleared")
 
 
 async def reboot() -> None:
@@ -261,28 +223,17 @@ async def reboot() -> None:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.info("Rebooting IO Board")
-    try:
+    async with _session('reboot'):
+        logger.info("Sending reboot command")
         await _send_command(
             CommandType.MANAGEMENT_CONTROL,
-            ManagementSubcommand.REBOOT.value,
+            ManagementSubcommand.REBOOT,
             {}
         )
-        logger.info("IO Board reboot initiated")
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to reboot IO Board: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Device reboot failed",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "reboot"}
-            ) from e
-        raise
+        logger.info("Reboot command sent")
 
 
-async def get_product_info() -> Dict[str, str]:
+async def get_product_info() -> ProductInfoData:
     """
     Get device manufacturing information.
     
@@ -294,31 +245,19 @@ async def get_product_info() -> Dict[str, str]:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.debug("Getting product info")
-    try:
+    async with _session('get_product_info'):
+        logger.info("Getting product info")
         response = await _send_command(
             CommandType.REQUEST,
-            RequestSubcommand.MANUFACTURING_INFO.value,
+            RequestSubcommand.MANUFACTURING_INFO,
             {}
         )
-        
-        result = {
-            "product_id": response.DATA.PRODUCT_ID,
-            "sw_version": response.DATA.SW_VERSION,
-        }
-        logger.debug(f"Product info: {result}")
+        result = ProductInfoData(
+            product_id=response.DATA.PRODUCT_ID,
+            sw_version=response.DATA.SW_VERSION
+        )
+        logger.info(f"Retrieved product info: {result}")
         return result
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get product info: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Failed to get product info",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "get_product_info"}
-            ) from e
-        raise
 
 
 async def get_loadcells() -> List[str]:
@@ -335,68 +274,43 @@ async def get_loadcells() -> List[str]:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.debug("Getting loadcell readings")
-    try:
+    async with _session('get_loadcells'):
+        logger.debug("Getting loadcell values")
         response = await _send_command(
             CommandType.REQUEST,
-            RequestSubcommand.LOADCELL_WEIGHTS.value,
+            RequestSubcommand.LOADCELL_WEIGHTS,
             {}
         )
-        
         result = list(response.DATA.LOADCELLS)
-        logger.debug(f"Loadcells: {result}")
+        logger.debug(f"Loadcell values retrieved: {result}")
         return result
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get loadcell readings: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Failed to get loadcell readings",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "get_loadcells"}
-            ) from e
-        raise
 
 
-async def get_io_status() -> Dict[str, str]:
+async def get_status() -> IOStatusData:
     """
     Get door and deadbolt sensor status.
     
     Returns:
-        Dictionary with 'door' and 'deadbolt' status strings (6 chars each).
-        Common values: "OPENED", "CLOSED", "ERROR_"
+        StatusData with 'door' and 'deadbolt' status values.
         
     Raises:
         DeviceError: If getting IO status fails
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.debug("Getting IO status")
-    try:
+    async with _session('get_status'):
+        logger.debug("Getting status")
         response = await _send_command(
             CommandType.REQUEST,
-            RequestSubcommand.IO_STATUS.value,
+            RequestSubcommand.IO_STATUS,
             {}
         )
-        
-        result = {
-            "door": response.DATA.DOOR,
-            "deadbolt": response.DATA.DEADBOLT,
-        }
-        logger.debug(f"IO status: {result}")
+        result = IOStatusData(
+            door=DoorState(response.DATA.DOOR),
+            deadbolt=DeadboltState(response.DATA.DEADBOLT)
+        )
+        logger.debug(f"Status retrieved: {result}")
         return result
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get IO status: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Failed to get IO status",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "get_io_status"}
-            ) from e
-        raise
 
 
 async def get_errors() -> List[str]:
@@ -412,25 +326,13 @@ async def get_errors() -> List[str]:
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    logger.debug("Getting error list")
-    try:
+    async with _session('get_errors'):
+        logger.debug("Getting errors")
         response = await _send_command(
             CommandType.REQUEST,
-            RequestSubcommand.ERROR_LIST.value,
+            RequestSubcommand.ERROR_LIST,
             {}
         )
-        
         result = list(response.DATA.ERRORS)
-        logger.debug(f"Errors: {result}")
+        logger.debug(f"Errors retrieved: {result}")
         return result
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get error list: {e}")
-        if not isinstance(e, (DeviceError,)):
-            raise DeviceError(
-                "Failed to get error list",
-                ErrorCode.DEVICE_COMMAND_FAILED,
-                {"command": "get_errors"}
-            ) from e
-        raise
