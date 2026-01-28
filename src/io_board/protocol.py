@@ -21,6 +21,7 @@ from construct import (
     Const,
     ConstructError,
     Enum,
+    Error,
     PaddedString,
     Pass,
     Struct,
@@ -102,6 +103,7 @@ RequestProtocol = Struct(
             "RQID": Pass,  # IO status - no data
             "RQER": Pass,  # Error list - no data
         },
+        default=Error,
     ),
     Const(ETX),  # End of Text
     "_length" / Tell,  # Current position for checksum calculation

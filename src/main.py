@@ -11,7 +11,7 @@ from io_board.api.main import serve_api
 from io_board.config import load_config
 from io_board.logging_config import setup_logging, get_logger
 from io_board.serial_io import configure_serial
-from io_board.stream import data_sources, polling_service, stream_queues
+from io_board.stream import data_sources, polling_service
 
 
 async def main() -> None:
