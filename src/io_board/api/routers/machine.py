@@ -90,7 +90,7 @@ class DeadboltRequest(BaseModel):
     """Request model for deadbolt control."""
 
     action: DeadboltAction = Field(
-        ..., description="Desired deadbolt state", examples=["UNLOCK", "LOCK"]
+        ..., description="Desired deadbolt state", examples=["OPEN", "CLOSE"]
     )
 
 
