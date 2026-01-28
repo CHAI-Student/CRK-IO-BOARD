@@ -38,53 +38,6 @@ streams=loadcells,doors
 
 ### Optional Query Parameters
 
-#### Interval Parameters
-
-##### `loadcell_interval` (float, optional)
-
-Polling interval for loadcell data in seconds.
-
-**Default:** `0.5`  
-**Range:** `[0.1, 10.0]` (inclusive)  
-**Unit:** Seconds  
-**Applies to:** `loadcells` stream only  
-
-**Examples:**
-```
-loadcell_interval=0.1    # 10 Hz - high frequency
-loadcell_interval=0.5    # 2 Hz - default
-loadcell_interval=2.0    # 0.5 Hz - low frequency
-```
-
-**Validation:**
-- Must be >= 0.1 (minimum 100ms)
-- Must be <= 10.0 (maximum 10 seconds)
-- Out-of-range values return `422 Unprocessable Entity`
-
----
-
-##### `door_interval` (float, optional)
-
-Polling interval for door status in seconds.
-
-**Default:** `1.0`  
-**Range:** `[0.1, 10.0]` (inclusive)  
-**Unit:** Seconds  
-**Applies to:** `doors` stream only  
-
-**Examples:**
-```
-door_interval=0.5    # Quick response to door changes
-door_interval=1.0    # Default - standard access control
-door_interval=5.0    # Low-frequency monitoring
-```
-
-**Validation:**
-- Must be >= 0.1
-- Must be <= 10.0
-
----
-
 #### Filter Parameters
 
 ##### `filter_method` (enum, optional)

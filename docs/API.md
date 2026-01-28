@@ -34,8 +34,6 @@ Authoritative source: [src/io_board/api.py](src/io_board/api.py). Legacy and cur
 | Name | Type/Range | Default | Description |
 | --- | --- | --- | --- |
 | streams | string (comma list) | required | `loadcells`, `doors`, or both. Rejects empty/unknown values. |
-| loadcell_interval | float 0.1–10.0 | 0.5 | Poll interval for loadcells (seconds). |
-| door_interval | float 0.1–10.0 | 1.0 | Poll interval for door/deadbolt (seconds). |
 | filter_method | enum | none | `none`, `exponential`, `kalman`; applied per loadcell. |
 | filter_alpha | float 0–1 | 0.2 | EMA alpha (lower = smoother). |
 | filter_q | float >0 | 0.001 | Kalman Q (process noise). |
