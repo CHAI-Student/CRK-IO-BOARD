@@ -48,7 +48,7 @@ class DoorState(str, Enum):
 class DeadboltState(str, Enum):
     """Deadbolt state values."""
 
-    OPENED = "OPENED"
+    UNLOCK = "UNLOCK"
     LOCKED = "LOCKED"
 
 

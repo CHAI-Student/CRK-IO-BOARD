@@ -9,7 +9,7 @@ from services import recording
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/recording", tags=["Recording"])
 
 @router.post("/start", summary="Start Recording")
 async def start_recording(request: Request):

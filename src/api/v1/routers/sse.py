@@ -11,6 +11,7 @@ from exceptions import IOBoardError
 from io_board.filters import FilterMethod, ThresholdScope
 from services.io_board.io_types import (
     DoorUpdateEvent,
+    IOStatusData,
     LoadcellChangeEvent,
     LoadcellUncertaintyEvent,
     LoadcellUpdateEvent,
@@ -649,6 +650,11 @@ async def handle_unified_sse(
         },
     )
 
+def unix_to_iso8601(timestamp: float) -> str:
+    """Convert a UNIX timestamp to ISO 8601 format."""
+    from datetime import datetime, timezone
+    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 
 def make_poll_loadcells(
     request: Request,
@@ -663,8 +669,9 @@ def make_poll_loadcells(
                 break
 
             try:
-                raw_values: list[str] = await loadcells_queue.get()
-                timestamp = datetime.utcnow().isoformat()
+                raw_values, timestamp = await loadcells_queue.get()
+                raw_values: list[str] = raw_values  # type: ignore
+                timestamp = unix_to_iso8601(timestamp)
 
                 # Process values through detector
                 (
@@ -772,8 +779,9 @@ def make_poll_doors(
                 break
 
             try:
-                io_status: dict[str, str] = await io_status_queue.get()
-                timestamp = datetime.utcnow().isoformat()
+                io_status, timestamp = await io_status_queue.get()
+                io_status: IOStatusData = io_status  # type: ignore
+                timestamp = unix_to_iso8601(timestamp)
                 door_event = DoorUpdateEvent(
                     timestamp=timestamp,
                     door=io_status["door"],

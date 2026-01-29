@@ -65,12 +65,10 @@ class RecordingService:
             await self._recording_running.wait()
 
             try:
-                result: DataSourceResult = await self._queue.get()
-                if result is None or not isinstance(result, DataSourceResult):
-                    continue
+                result, timestamp = await self._queue.get()
                 self.recordings.append(RecordingData(
-                    data=result.data,
-                    timestamp=result.timestamp,
+                    data=result,
+                    timestamp=timestamp,
                 ))
             except Exception as e:
                 logger.error(f"Service [{self.name}]: Error in loop: {e}", exc_info=e)

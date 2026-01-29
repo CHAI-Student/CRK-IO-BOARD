@@ -66,7 +66,7 @@ async def get_health() -> HealthResponse:
         prev_status = await commands.get_status()
         await commands.set_deadbolt(
             DeadboltAction.OPEN
-            if prev_status["deadbolt"] == DeadboltState.LOCKED
+            if prev_status["deadbolt"] == DeadboltState.UNLOCK
             else DeadboltAction.CLOSE
         )
         errors = await commands.get_errors()
@@ -98,7 +98,7 @@ class DeadboltResponse(BaseModel):
     """Response model for deadbolt control."""
 
     state: DeadboltState = Field(
-        ..., description="Current deadbolt state", examples=["OPENED", "LOCKED"]
+        ..., description="Current deadbolt state", examples=["UNLOCK", "LOCKED"]
     )
 
 

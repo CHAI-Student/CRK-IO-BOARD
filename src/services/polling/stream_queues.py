@@ -10,4 +10,4 @@ class StreamQueue(asyncio.Queue):
         item: DataSourceResult | DataSourceError = super().get_nowait()
         if isinstance(item, DataSourceError):
             raise item.error
-        return item.data
+        return item.data, item.timestamp

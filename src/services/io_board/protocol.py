@@ -124,7 +124,7 @@ ResponseProtocol = Struct(
             # Management Control responses
             "MCPD": Pass,  # Initialize board - no response data
             "MCDC": Struct(
-                "DEADBOLT" / Enum(Byte, OPENED=ord("O"), LOCKED=ord("C")),
+                "DEADBOLT" / Enum(Byte, UNLOCK=ord("O"), LOCKED=ord("C")),
             ),  # Door control - returns state
             "MCLZ": Pass,  # Calibrate - no response data
             "MCWP": Struct(
