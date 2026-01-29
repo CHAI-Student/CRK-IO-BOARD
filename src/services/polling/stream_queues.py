@@ -2,7 +2,7 @@ import asyncio
 
 from .data_sources import DataSourceError, DataSourceResult
 
-class Queue(asyncio.Queue):
+class StreamQueue(asyncio.Queue):
     def __init__(self, maxsize: int = 0):
         super().__init__(maxsize=maxsize)
     

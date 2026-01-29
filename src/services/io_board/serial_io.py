@@ -13,18 +13,18 @@ from typing import Optional
 import serial
 import serial_asyncio
 
-from .config import SerialConfig
-from .exceptions import ErrorCode, SerialCommunicationError
-from .logging_config import PerformanceLogger, get_logger, log_payload
+from core.config import SerialModel
+from core.logging_config import PerformanceLogger, get_logger, log_payload
+from exceptions import ErrorCode, SerialCommunicationError
 
 logger = get_logger(__name__)
 
 # Global serial configuration and mutex
-_serial_config: Optional[SerialConfig] = None
+_serial_config: Optional[SerialModel] = None
 _serial_mutex = asyncio.Lock()
 
 
-def configure_serial(config: SerialConfig) -> None:
+def configure_serial(config: SerialModel) -> None:
     """
     Configure serial communication parameters.
     
@@ -40,7 +40,7 @@ def configure_serial(config: SerialConfig) -> None:
     )
 
 
-def get_serial_config() -> SerialConfig:
+def get_serial_config() -> SerialModel:
     """
     Get current serial configuration.
     

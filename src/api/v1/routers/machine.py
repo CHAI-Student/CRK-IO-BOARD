@@ -5,8 +5,8 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from io_board import commands
-from io_board.io_types import (
+from services.io_board import commands
+from services.io_board.io_types import (
     DeadboltAction,
     DeadboltState,
     DoorState,

@@ -25,7 +25,7 @@ from io_board.protocol import (
     STX,
     ETX,
 )
-from io_board.exceptions import ProtocolError, ErrorCode
+from exceptions import ProtocolError, ErrorCode
 
 
 class TestChecksumCalculation:

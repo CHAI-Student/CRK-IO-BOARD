@@ -1,72 +1,80 @@
 """
-IO Board Control Service - Main Entry Point.
+FastAPI REST API for IO Board device control.
 
-This module is the main entry point for the IO Board control service.
-It loads configuration, sets up logging, and starts the FastAPI server.
+This module provides a RESTful API interface to the IO Board device with:
+- Comprehensive endpoint documentation
+- Standard error responses
+- Request/response validation
+- Structured logging
+- Correlation ID tracking
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 
-from io_board import recording
-from io_board.api.main import serve_api
-from io_board.config import load_config
-from io_board.logging_config import setup_logging, get_logger
-from io_board.serial_io import configure_serial
-from io_board.stream import data_sources, polling_service
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError as PydanticValidationError
+from uvicorn.config import Config
+from uvicorn.server import Server
+
+from api.v1.routers import machine, management, recording, sse
+from core.config import Settings
+from core.logging_config import (
+    PerformanceLogger,
+    clear_correlation_id,
+    get_logger,
+    set_correlation_id,
+    setup_logging,
+)
+from exceptions import IOBoardError
+from services.polling import data_sources, polling_service
+from services.io_board.serial_io import configure_serial
+
+logger = get_logger(__name__)
+
+# Shared shutdown signal for cooperative streaming stop
+stop_event = asyncio.Event()
 
 
-async def main() -> None:
-    """
-    Main application entry point.
-    
-    Loads configuration from environment variables, sets up logging,
-    configures serial communication, and starts the API server.
-    """
-    # Load configuration from environment
-    config = load_config()
-    
-    # Setup structured logging
-    setup_logging(config.api.log_level.upper())
-    logger = get_logger(__name__)
-    
-    logger.info("=" * 60)
-    logger.info("IO Board Control Service Starting")
-    logger.info("=" * 60)
-    
-    # Log configuration (without sensitive data)
-    logger.info(f"Serial Port: {config.serial.port}")
-    logger.info(f"Serial Baudrate: {config.serial.baudrate}")
-    logger.info(f"API Host: {config.api.host}")
-    logger.info(f"API Port: {config.api.port}")
-    logger.info(f"Log Level: {config.api.log_level}")
-    
-    # Configure serial communication
-    configure_serial(config.serial)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan context manager."""
+
+    app.state.stop_event = stop_event
+
+    settings = app.state.settings
+
+    setup_logging(settings.api.log_level.upper())
+
+    configure_serial(settings.serial)
 
     loadcells_data_source = data_sources.LoadCellsDataSource()
     loadcells_polling_service = polling_service.PollingService(
         data_source=loadcells_data_source,
-        interval=config.stream.loadcell_poll_interval,
+        interval=settings.polling.loadcells_poll_interval,
         name="LoadCells",
     )
     io_status_data_source = data_sources.IOStatusDataSource()
     io_status_polling_service = polling_service.PollingService(
         data_source=io_status_data_source,
-        interval=config.stream.io_status_poll_interval,
+        interval=settings.polling.io_status_poll_interval,
         name="IOStatus",
     )
 
-    polling_services = {
+    app.state.polling_services = {
         "loadcells": loadcells_polling_service,
         "io_status": io_status_polling_service,
     }
+
+    import services.recording as recording
 
     loadcells_recording_service = recording.RecordingService(
         polling_service=loadcells_polling_service,
         name="LoadCellsRecording",
     )
 
-    recording_services = {
+    app.state.recording_services = {
         "loadcells": loadcells_recording_service,
     }
 
@@ -77,14 +85,8 @@ async def main() -> None:
     # Start recording services
     await loadcells_recording_service.start()
 
-    # Start API server
     try:
-        await serve_api(config.api, polling_services, recording_services)
-    except KeyboardInterrupt:
-        logger.info("Received shutdown signal")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=e)
-        raise
+        yield
     finally:
         # Stop recording services
         await loadcells_recording_service.stop()
@@ -94,7 +96,155 @@ async def main() -> None:
         logger.info("IO Board Control Service Stopped")
 
 
+app = FastAPI(
+    title="IO Board Control API",
+    description="REST API for controlling IO Board device with loadcells, door locks, and sensors",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    """
+    Middleware for request/response logging with correlation IDs.
+
+    Logs all incoming requests and outgoing responses with timing information
+    and correlation IDs for request tracing.
+    """
+    # Generate correlation ID for this request
+    correlation_id = set_correlation_id()
+
+    # Log incoming request
+    logger.info(
+        f"Request started: method={request.method} path={request.url.path} "
+        f"client={request.client.host if request.client else 'unknown'}"
+    )
+
+    # Log request body for POST/PUT/PATCH
+    if request.method in ["POST", "PUT", "PATCH"]:
+        try:
+            body = await request.body()
+            if body:
+                logger.debug(f"Request body: {body.decode('utf-8')}")
+        except Exception:
+            pass
+
+    # Process request and measure time
+    try:
+        with PerformanceLogger(logger, "request", path=request.url.path):
+            response = await call_next(request)
+
+        # Log response
+        logger.info(f"Request completed: status={response.status_code}")
+
+        # Add correlation ID to response headers
+        response.headers["X-Correlation-ID"] = correlation_id
+
+        return response
+    finally:
+        clear_correlation_id()
+
+
+@app.exception_handler(IOBoardError)
+async def ioboard_error_handler(request: Request, exc: IOBoardError) -> JSONResponse:
+    """
+    Global exception handler for IO Board errors.
+
+    Converts all IOBoardError exceptions to standard JSON error responses.
+    """
+    logger.error(
+        f"IO Board error: {exc.error_code.value} - {exc.message}", exc_info=exc
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=exc.to_dict(),
+    )
+
+
+@app.exception_handler(PydanticValidationError)
+async def validation_error_handler(
+    request: Request, exc: PydanticValidationError
+) -> JSONResponse:
+    """
+    Global exception handler for Pydantic validation errors.
+
+    Converts validation errors to standard JSON error responses.
+    """
+    logger.warning(f"Validation error: {exc.errors()}")
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error_code": "E4001",
+            "message": "Request validation failed",
+            "details": {"errors": exc.errors()},
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Global exception handler for unexpected errors.
+
+    Logs the full exception and returns a generic error response
+    without leaking internal details.
+    """
+    logger.error(f"Unexpected error: {exc}", exc_info=exc)
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error_code": "E9001",
+            "message": "Internal server error",
+            "details": {},
+        },
+    )
+
+
+app.include_router(management.router)
+app.include_router(machine.router)
+app.include_router(recording.router)
+app.include_router(sse.router)
+
+
+#####################
+# Graceful Shutdown #
+#####################
+
+
+class GracefulShutdownServer(Server):
+    """Uvicorn server subclass that handles graceful shutdown."""
+
+    async def shutdown(self, *args, **kwargs) -> None:
+        """Handle server shutdown by setting the stop event."""
+        logger.info("Server shutdown initiated, stopping services...")
+        stop_event.set()
+        await super().shutdown(*args, **kwargs)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    settings = app.state.settings = Settings()
 
+    config = Config(
+        app,
+        host=settings.api.host,
+        port=settings.api.port,
+        log_level=settings.api.log_level,
+        timeout_graceful_shutdown=settings.api.timeout_graceful_shutdown,
+    )
 
+    server = GracefulShutdownServer(config=config)
+
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
+
+else:
+    # To support graceful shutdown, It is mandatory to replace uvicorn server implementation
+    # So if this module is imported, we exit with an error
+    print("This module is intended to be run as the main program.")
+    exit(1)

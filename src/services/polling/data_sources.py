@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-import io_board.commands
+import services.io_board.commands
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class DataSource:
 class LoadCellsDataSource(DataSource):
     async def fetch(self):
         try:
-            loadcells = await io_board.commands.get_loadcells()
+            loadcells = await services.io_board.commands.get_loadcells()
             return DataSourceResult(data=loadcells)
         except Exception as e:
             return DataSourceError(error=e)
@@ -37,7 +37,7 @@ class LoadCellsDataSource(DataSource):
 class IOStatusDataSource(DataSource):
     async def fetch(self):
         try:
-            io_status = await io_board.commands.get_status()
+            io_status = await services.io_board.commands.get_status()
             return DataSourceResult(data=io_status)
         except Exception as e:
             return DataSourceError(error=e)

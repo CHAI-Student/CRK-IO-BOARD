@@ -4,9 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from io_board.stream.data_sources import DataSourceResult
-from io_board.stream.polling_service import PollingService
-from io_board.stream import stream_queues
+from services.polling import DataSourceResult, PollingService, StreamQueue
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +17,7 @@ class RecordingService:
         self.polling_service: PollingService = polling_service
         self.name: str = name
 
-        self._queue = stream_queues.Queue()
+        self._queue = StreamQueue()
 
         self.recordings: list[RecordingData] = []
         

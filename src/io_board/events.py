@@ -6,7 +6,6 @@ anti-theft monitoring. Any uncertainty (errors, parse failures, I/O failures)
 is treated as a potential theft event.
 """
 
-from datetime import datetime
 from typing import Optional
 
 from .filters import LoadcellFilter, ThresholdScope, create_filter, FilterMethod

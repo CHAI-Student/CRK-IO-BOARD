@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from io_board import commands
-from io_board.io_types import (
+from services.io_board import commands
+from services.io_board.io_types import (
     ErrorItem,
     ErrorListResponse,
     ManufacturingNumberRequest,

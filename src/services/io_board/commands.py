@@ -9,11 +9,11 @@ type hints, docstrings, and error handling.
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List
 
-from .exceptions import DeviceError, ErrorCode, ValidationError
-from .logging_config import PerformanceLogger, get_logger
-from .protocol import build_request, parse_response
-from .serial_io import fetch
-from .io_types import (
+from exceptions import DeviceError, ErrorCode, ValidationError
+from core.logging_config import PerformanceLogger, get_logger
+from services.io_board.protocol import build_request, parse_response
+from services.io_board.serial_io import fetch
+from services.io_board.io_types import (
     CommandType,
     DeadboltAction,
     DeadboltState,

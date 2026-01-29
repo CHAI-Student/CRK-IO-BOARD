@@ -2,14 +2,14 @@ import asyncio
 import logging
 
 from .data_sources import DataSource
-from .stream_queues import Queue
+from .stream_queues import StreamQueue
 
 logger = logging.getLogger(__name__)
 
 class PollingService:
     def __init__(self, data_source: DataSource, interval: float = 1.0, name: str = ""):
         self.data_source: DataSource = data_source
-        self.subscribers: set[Queue] = set()
+        self.subscribers: set[StreamQueue] = set()
         self.interval: float = interval
         self.name: str = name
         
@@ -37,7 +37,7 @@ class PollingService:
                 pass
         logger.info(f"Service [{self.name}]: Stopped")
 
-    async def subscribe(self, queue: Queue):
+    async def subscribe(self, queue: StreamQueue):
         """Register a subscriber queue."""
         self.subscribers.add(queue)
         logger.info(f"Service [{self.name}]: Subscriber added. Total: {len(self.subscribers)}")
@@ -47,7 +47,7 @@ class PollingService:
             self._has_subscribers.set()
             logger.info(f"Service [{self.name}]: >>> Polling RESUMED <<<")
 
-    async def unsubscribe(self, queue: Queue):
+    async def unsubscribe(self, queue: StreamQueue):
         """Unregister a subscriber queue."""
         if queue in self.subscribers:
             self.subscribers.remove(queue)

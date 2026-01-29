@@ -7,16 +7,16 @@ from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from io_board.events import LoadcellChangeDetector
-from io_board.exceptions import IOBoardError
+from exceptions import IOBoardError
 from io_board.filters import FilterMethod, ThresholdScope
-from io_board.io_types import (
+from services.io_board.io_types import (
     DoorUpdateEvent,
     LoadcellChangeEvent,
     LoadcellUncertaintyEvent,
     LoadcellUpdateEvent,
     StandardErrorResponse,
 )
-from io_board.stream import stream_queues
+from services.polling import StreamQueue
 
 logger = logging.getLogger(__name__)
 
@@ -424,41 +424,41 @@ async def handle_unified_sse(
     streams: str = Query(
         ...,
         description="Comma-separated list of streams to enable (loadcells, doors)",
-        example="loadcells,doors",
+        examples=["loadcells,doors", "loadcells", "doors"],
     ),
     filter_method: FilterMethod = Query(
         default=FilterMethod.NONE,
         description="Filtering method for loadcell values (none, exponential, kalman)",
-        example="exponential",
+        examples=["none", "exponential", "kalman"],
     ),
     filter_alpha: float = Query(
         default=0.2,
         ge=0.0,
         le=1.0,
         description="Alpha parameter for exponential smoothing (0.0=max smoothing, 1.0=no smoothing)",
-        example=0.3,
+        examples=[0.0, 0.3, 1.0],
     ),
     filter_q: float = Query(
         default=0.001,
         gt=0.0,
         description="Process noise covariance (Q) for Kalman filter",
-        example=0.001,
+        examples=[0.001],
     ),
     filter_r: float = Query(
         default=1.0,
         gt=0.0,
         description="Measurement noise covariance (R) for Kalman filter",
-        example=1.0,
+        examples=[1.0],
     ),
     threshold: str = Query(
         default="0.0",
         description="Threshold for change detection. Single value (broadcast to all 10) or comma-separated list of 10 values",
-        example="5.0",
+        examples=["5.0"],
     ),
     threshold_scope: ThresholdScope = Query(
         default=ThresholdScope.FILTERED,
         description="Apply threshold to raw or filtered values",
-        example="filtered",
+        examples=["filtered"],
     ),
 ) -> JSONResponse | StreamingResponse:
     """
@@ -563,7 +563,7 @@ async def handle_unified_sse(
         detector = None
         if "loadcells" in enabled_streams:
             loadcells_queue = (
-                stream_queues.Queue()
+                StreamQueue()
             )  # TODO: Pass actual loadcell queue from commands module
             await request.app.state.polling_services["loadcells"].subscribe(
                 loadcells_queue
@@ -587,7 +587,7 @@ async def handle_unified_sse(
         io_status_queue = None
         if "doors" in enabled_streams:
             io_status_queue = (
-                stream_queues.Queue()
+                StreamQueue()
             )  # TODO: Pass actual I/O status queue from commands module
             await request.app.state.polling_services["io_status"].subscribe(
                 io_status_queue
@@ -652,7 +652,7 @@ async def handle_unified_sse(
 
 def make_poll_loadcells(
     request: Request,
-    loadcells_queue: stream_queues.Queue,
+    loadcells_queue: StreamQueue,
     event_queue: asyncio.Queue,
     detector: LoadcellChangeDetector,
 ):
@@ -762,7 +762,7 @@ def make_poll_loadcells(
 
 def make_poll_doors(
     request: Request,
-    io_status_queue: stream_queues.Queue,
+    io_status_queue: StreamQueue,
     event_queue: asyncio.Queue,
 ):
     async def poll_doors():

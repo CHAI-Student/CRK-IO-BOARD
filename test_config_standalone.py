@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from io_board.config import (
+from core.config import (
     SerialConfig,
     APIConfig,
     Config,

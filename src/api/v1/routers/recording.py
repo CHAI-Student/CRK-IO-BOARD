@@ -4,7 +4,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from io_board import recording
+from services import recording
 
 
 logger = logging.getLogger(__name__)

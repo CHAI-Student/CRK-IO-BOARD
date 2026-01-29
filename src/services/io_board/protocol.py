@@ -29,8 +29,8 @@ from construct import (
     Tell,
 )
 
-from .exceptions import ErrorCode, ProtocolError
-from .logging_config import get_logger
+from exceptions import ErrorCode, ProtocolError
+from core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
