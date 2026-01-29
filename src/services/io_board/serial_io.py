@@ -210,7 +210,6 @@ async def fetch(message: bytes) -> bytes:
     
     async with _serial_mutex:
         with PerformanceLogger(logger, "serial_fetch", port=config.port):
-            logger.debug(f"Opening serial port: {config.port} @ {config.baudrate} baud")
             reader, writer = await get_serial_connection()
             
             try:
@@ -273,5 +272,5 @@ async def fetch(message: bytes) -> bytes:
             finally:
                 # Always close the connection
                 logger.debug("Closing serial port")
-                writer.close()
-                await writer.wait_closed()
+                # writer.close()
+                # await writer.wait_closed()
