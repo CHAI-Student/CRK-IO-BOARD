@@ -55,6 +55,7 @@ class RecordingService:
     async def stop_recording(self):
         self._recording_running.clear()
         await self.polling_service.unsubscribe(self._queue)
+        self._queue.shutdown()
         self._queue = StreamQueue()
     
     async def retrieve_recording(self):
@@ -71,5 +72,7 @@ class RecordingService:
                     data=result,
                     timestamp=timestamp,
                 ))
+            except asyncio.QueueShutDown:
+                pass
             except Exception as e:
                 logger.error(f"Service [{self.name}]: Error in loop: {e}", exc_info=e)
