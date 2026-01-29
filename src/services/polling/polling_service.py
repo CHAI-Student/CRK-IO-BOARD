@@ -67,6 +67,8 @@ class PollingService:
 
             # 2. POLL: Fetch data
             try:
+                timestamp = asyncio.get_event_loop().time()
+
                 data = await self.data_source.fetch()
                 logger.debug(f"Service [{self.name}]: Polled Data [{data}]")
 
@@ -76,7 +78,7 @@ class PollingService:
                     await q.put(data)
 
                 # 4. INTERVAL: Wait before next poll
-                await asyncio.sleep(self.interval)
+                await asyncio.sleep(self.interval - (asyncio.get_event_loop().time() - timestamp))
 
             except Exception as e:
                 logger.error(f"Service [{self.name}]: Error in loop: {e}")
