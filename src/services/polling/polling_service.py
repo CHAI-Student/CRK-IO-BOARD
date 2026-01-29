@@ -68,7 +68,7 @@ class PollingService:
             # 2. POLL: Fetch data
             try:
                 data = await self.data_source.fetch()
-                logger.info(f"Service [{self.name}]: Polled Data [{data}]")
+                logger.debug(f"Service [{self.name}]: Polled Data [{data}]")
 
                 # 3. BROADCAST: Send to all active queues
                 # We iterate over a copy list() in case a subscriber leaves during iteration

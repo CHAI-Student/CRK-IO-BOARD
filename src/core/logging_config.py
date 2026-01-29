@@ -74,32 +74,33 @@ def setup_logging(log_level: str = "INFO") -> None:
     # Convert log level string to constant
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     
-    # Configure root logger
-    logger = logging.getLogger("io_board")
-    logger.setLevel(numeric_level)
-    
-    # Remove existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
-    # Create console handler with structured formatter
-    handler = logging.StreamHandler()
-    handler.setLevel(numeric_level)
-    
-    # Apply structured formatter
-    formatter = StructuredFormatter(
-        fmt="%(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    handler.setFormatter(formatter)
-    
-    # Add correlation ID filter
-    handler.addFilter(CorrelationIdFilter())
-    
-    logger.addHandler(handler)
-    
-    # Prevent propagation to root logger
-    logger.propagate = False
+    for name in ["api", "core", "io_board", "services"]:
+        # Configure logger
+        logger = logging.getLogger(name)
+        logger.setLevel(numeric_level)
+        
+        # Remove existing handlers
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
+        # Create console handler with structured formatter
+        handler = logging.StreamHandler()
+        handler.setLevel(numeric_level)
+        
+        # Apply structured formatter
+        formatter = StructuredFormatter(
+            fmt="%(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        handler.setFormatter(formatter)
+        
+        # Add correlation ID filter
+        handler.addFilter(CorrelationIdFilter())
+        
+        logger.addHandler(handler)
+        
+        # Prevent propagation to root logger
+        logger.propagate = False
 
 
 def get_logger(name: str) -> logging.Logger:

@@ -79,13 +79,14 @@ async def get_serial_connection():
     # Wait for any existing connection to close
     if writer is not None:
         logger.debug("Waiting for existing serial connection to close")
+        writer.close()
         await writer.wait_closed()
         reader = None
         writer = None
 
     # Establish new serial connection
     config = get_serial_config()
-    logger.debug(f"Opening serial port: {config.port} @ {config.baudrate} baud")
+    logger.info(f"Opening serial port: {config.port} @ {config.baudrate} baud")
     try:
         reader, writer = await serial_asyncio.open_serial_connection(
             url=config.port,
