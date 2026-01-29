@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from typing import Literal
@@ -72,6 +73,8 @@ async def get_health() -> HealthResponse:
         errors = await commands.get_errors()
         if not all(map(lambda x: x == "    " or x == "0000", errors)):
             deadbolt_status = "UNHEALTHY"
+        if prev_status["deadbolt"] == DeadboltState.LOCKED and prev_status["door"] == DoorState.OPENED:
+            deadbolt_status = "UNHEALTHY"
     except:
         deadbolt_status = "UNHEALTHY"
 
@@ -143,6 +146,9 @@ async def set_deadbolt(request: DeadboltRequest) -> DeadboltResponse:
         Current deadbolt state after command execution
     """
     await commands.set_deadbolt(request.action)
+
+    # Adding delay to assure state change has taken effect
+    await asyncio.sleep(0.5)
 
     # Also get full IO status to verify deadbolt state
     io_status = await commands.get_status()

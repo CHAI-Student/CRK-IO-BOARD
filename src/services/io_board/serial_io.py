@@ -268,6 +268,13 @@ async def fetch(message: bytes) -> bytes:
                             "message_hex": message.hex()
                         }
                     ) from last_exception
+            
+            except Exception as e:
+                # Reset connection on any unexpected error
+                logger.error(f"Serial communication error: {e} (resetting connection)")
+                writer.close()
+                await writer.wait_closed()
+                raise
                     
             finally:
                 # Always close the connection
