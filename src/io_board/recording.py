@@ -1,10 +1,18 @@
 import asyncio
 import logging
+from typing import Any
 
+from pydantic import BaseModel
+
+from io_board.stream.data_sources import DataSourceResult
 from io_board.stream.polling_service import PollingService
-from stream import stream_queues
+from io_board.stream import stream_queues
 
 logger = logging.getLogger(__name__)
+
+class RecordingData(BaseModel):
+    data: Any
+    timestamp: float
 
 class RecordingService:
     def __init__(self, polling_service: PollingService, name: str = ""):
@@ -13,7 +21,7 @@ class RecordingService:
 
         self._queue = stream_queues.Queue()
 
-        self.recordings: list = []
+        self.recordings: list[RecordingData] = []
         
         # This event controls the loop. 
         # Unset (False) = Stop Polling. Set (True) = Poll.
@@ -59,10 +67,12 @@ class RecordingService:
             await self._recording_running.wait()
 
             try:
-                result = await self._queue.get()
-                self.recordings.append({
-                    "data": result.data,
-                    "timestamp": result.timestamp,
-                })
+                result: DataSourceResult = await self._queue.get()
+                if result is None or not isinstance(result, DataSourceResult):
+                    continue
+                self.recordings.append(RecordingData(
+                    data=result.data,
+                    timestamp=result.timestamp,
+                ))
             except Exception as e:
-                logger.error(f"Service [{self.name}]: Error in loop: {e}")
+                logger.error(f"Service [{self.name}]: Error in loop: {e}", exc_info=e)
