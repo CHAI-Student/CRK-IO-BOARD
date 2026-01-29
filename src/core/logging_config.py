@@ -186,7 +186,7 @@ class PerformanceLogger:
         context_str = " ".join(f"{k}={v}" for k, v in self.context.items())
         
         if exc_type is None:
-            self.logger.info(
+            self.logger.debug(
                 f"Completed {self.operation} in {duration_ms:.2f}ms {context_str}".strip()
             )
         else:

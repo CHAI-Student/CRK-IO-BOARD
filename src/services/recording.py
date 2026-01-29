@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from services.polling import DataSourceResult, PollingService, StreamQueue
+from services.polling import PollingService, StreamQueue
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class RecordingService:
     async def stop_recording(self):
         self._recording_running.clear()
         await self.polling_service.unsubscribe(self._queue)
+        self._queue = StreamQueue()
     
     async def retrieve_recording(self):
         return self.recordings
