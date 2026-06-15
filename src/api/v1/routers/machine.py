@@ -3,9 +3,10 @@ import logging
 import re
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from services import error_state_mgmt
 from services.io_board import commands
 from services.io_board.io_types import (
     DeadboltAction,
@@ -32,6 +33,7 @@ class HealthResponse(BaseModel):
 
     deadbolt: Literal["HEALTHY", "UNHEALTHY"]
     loadcells: Literal["HEALTHY", "UNHEALTHY"]
+    door: Literal["HEALTHY", "UNHEALTHY"]
 
 
 LOADCELL_PATTERN = re.compile(r"^(\+|-)\d{5}$")
@@ -49,8 +51,13 @@ LOADCELL_PATTERN = re.compile(r"^(\+|-)\d{5}$")
     summary="Get IO board health status",
     description="Check if the IO board is reachable and functioning properly.",
 )
-async def get_health() -> HealthResponse:
+async def get_health(request: Request) -> HealthResponse:
     """Get IO board health status."""
+    error_state_management_service: error_state_mgmt.ErrorStateManagementService = request.app.state.recording_services["error_state_management"]
+    door_status = "HEALTHY"
+    if not await error_state_management_service.door_error():
+        door_status = "UNHEALTHY"
+
     loadcells_status = "HEALTHY"
     try:
         loadcells = await commands.get_loadcells()
@@ -63,24 +70,28 @@ async def get_health() -> HealthResponse:
 
     deadbolt_status = "HEALTHY"
     try:
-        await commands.clear_errors()
-        prev_status = await commands.get_status()
-        await commands.set_deadbolt(
-            DeadboltAction.OPEN
-            if prev_status["deadbolt"] == DeadboltState.UNLOCK
-            else DeadboltAction.CLOSE
-        )
-        errors = await commands.get_errors()
-        if not all(map(lambda x: x == "    " or x == "0000", errors)):
+        if not await error_state_management_service.deadbolt_error():
             deadbolt_status = "UNHEALTHY"
-        if prev_status["deadbolt"] == DeadboltState.LOCKED and prev_status["door"] == DoorState.OPENED:
-            deadbolt_status = "UNHEALTHY"
+        else:
+            await commands.clear_errors()
+            prev_status = await commands.get_status()
+            await commands.set_deadbolt(
+                DeadboltAction.OPEN
+                if prev_status["deadbolt"] == DeadboltState.UNLOCK
+                else DeadboltAction.CLOSE
+            )
+            errors = await commands.get_errors()
+            if not all(map(lambda x: x == "    " or x == "0000", errors)):
+                deadbolt_status = "UNHEALTHY"
+            if prev_status["deadbolt"] == DeadboltState.LOCKED and prev_status["door"] == DoorState.OPENED:
+                deadbolt_status = "UNHEALTHY"
     except:
         deadbolt_status = "UNHEALTHY"
 
     return HealthResponse(
         deadbolt=deadbolt_status,
         loadcells=loadcells_status,
+        door=door_status
     )
 
 
@@ -135,7 +146,7 @@ async def get_deadbolt() -> DeadboltResponse:
     summary="Control door deadbolt",
     description="Open or close the door deadbolt lock. Returns the actual state after command execution.",
 )
-async def set_deadbolt(request: DeadboltRequest) -> DeadboltResponse:
+async def set_deadbolt(request: Request, deadbolt_request: DeadboltRequest) -> DeadboltResponse:
     """
     Control door deadbolt lock.
 
@@ -145,7 +156,9 @@ async def set_deadbolt(request: DeadboltRequest) -> DeadboltResponse:
     Returns:
         Current deadbolt state after command execution
     """
-    await commands.set_deadbolt(request.action)
+    error_state_management_service: error_state_mgmt.ErrorStateManagementService = request.app.state.recording_services["error_state_management"]
+    await error_state_management_service.set_deadbolt_action(deadbolt_request.action)
+    await commands.set_deadbolt(deadbolt_request.action)
 
     # Adding delay to assure state change has taken effect
     await asyncio.sleep(0.5)

@@ -68,14 +68,21 @@ async def lifespan(app: FastAPI):
     }
 
     import services.recording as recording
+    import services.error_state_mgmt as error_state_mgmt
 
     loadcells_recording_service = recording.RecordingService(
         polling_service=loadcells_polling_service,
         name="LoadCellsRecording",
     )
 
+    error_state_management_service = error_state_mgmt.ErrorStateManagementService(
+        polling_service=io_status_polling_service,
+        name="ErrorStateManagement",
+    )
+
     app.state.recording_services = {
         "loadcells": loadcells_recording_service,
+        "error_state_management": error_state_management_service,
     }
 
     # Start polling services
@@ -84,12 +91,13 @@ async def lifespan(app: FastAPI):
 
     # Start recording services
     await loadcells_recording_service.start()
-
+    await error_state_management_service.start()
     try:
         yield
     finally:
         # Stop recording services
         await loadcells_recording_service.stop()
+        await error_state_management_service.stop()
         # Stop polling services
         await loadcells_polling_service.stop()
         await io_status_polling_service.stop()
