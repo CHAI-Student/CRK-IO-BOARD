@@ -89,9 +89,10 @@ def setup_logging(log_level: str = "INFO") -> None:
         
         # Apply structured formatter
         formatter = StructuredFormatter(
-            fmt="%(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            fmt="%(asctime)s.%(msecs)03d %(message)s",
+            #datefmt="%Y-%m-%d %H:%M:%S"
         )
+        formatter.default_msec_format = "%s.%03d"
         handler.setFormatter(formatter)
         
         # Add correlation ID filter

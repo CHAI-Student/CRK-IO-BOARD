@@ -129,7 +129,7 @@ class PollingModel(BaseModel):
     """Polling service configuration settings."""
 
     loadcells_poll_interval: float = Field(
-        default=0.099,
+        default=0.12,
         description="Loadcell poll interval in seconds",
     )
     io_status_poll_interval: float = Field(
