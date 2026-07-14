@@ -108,9 +108,12 @@ class LoadcellChangeDetector:
                 delta = abs(compare_value - previous_value)
                 if delta > self.thresholds[i]:
                     changed_indices.append(i)
-                    change_details["old_values"].append(previous_value)
-                    change_details["new_values"].append(compare_value)
-                    change_details["deltas"].append(delta)
+                    # Round to sensor resolution (0.1) - keeps event payloads
+                    # free of float artifacts; the comparison above uses
+                    # full floats.
+                    change_details["old_values"].append(round(previous_value, 1))
+                    change_details["new_values"].append(round(compare_value, 1))
+                    change_details["deltas"].append(round(delta, 1))
             
             # Update previous values
             self._previous_raw[i] = raw_num

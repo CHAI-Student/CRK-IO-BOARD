@@ -35,7 +35,7 @@ Sources: [src/io_board/protocol.py](src/io_board/protocol.py), [src/io_board/io_
 
 ### Field Formats
 - Manufacturing/product ID: 11 ASCII characters (e.g., `P1234567890`).
-- Loadcell reading: sign + five digits, e.g., `+01234`, `-40000`; errors `EEEEEE`, `VVVVVV`; practical range 0–40000 g in spec though code allows larger format.
+- Loadcell reading: 6 ASCII characters. Integer firmware: sign + five digits, e.g., `+01234`, `-40000`. Fractional firmware (sensor resolution 0.1): sign + `XXX.X`, e.g., `+123.4`, `-079.5` — decimal only fits for |value| < 1000; larger values fall back to integer form. Errors `EEEEEE`, `VVVVVV`; practical range 0–40000 g in spec though code allows larger format. Host software parses both forms transparently and preserves one decimal in filtered output.
 - Door/deadbolt state: 6-char strings, typically `CLOSED`, `OPENED`, `LOCKED`/`OPENED` per CSV; code treats as opaque 6-char.
 - Errors: 4-char codes; empty slots `0000`.
 

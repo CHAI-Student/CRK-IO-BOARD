@@ -1,5 +1,18 @@
 # IO Board Module - Changelog
 
+## Version 2.0.1 - Fractional Loadcell Values (2026-07-14)
+
+### ✨ New Features
+
+#### Fractional Loadcell Values (sensor resolution 0.1)
+- Readings such as `+123.4` (fractional firmware) parse transparently; filtered
+  output preserves one decimal place when it fits the 6-character field and
+  falls back to the legacy integer form for |value| >= 1000, so devices on
+  pre-fractional firmware are unaffected.
+- `loadcell.change` payload values (`old_values`/`new_values`/`deltas`) are
+  rounded to 0.1 (sensor resolution); threshold comparisons still use full
+  floats internally.
+
 ## Version 2.0.0 - Enterprise Refactor (2026-01-17)
 
 ### 🎉 Major Changes
