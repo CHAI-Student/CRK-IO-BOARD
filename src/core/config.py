@@ -144,6 +144,61 @@ class PollingModel(BaseModel):
         return value
 
 
+class SanitizeModel(BaseModel):
+    """Loadcell reading sanitizer settings (sign-glitch fix + quantization).
+
+    Defaults are derived from the issue #1 flicker capture: glitches are
+    single-frame, magnitude-preserving sign inversions (~12% of frames),
+    and the LABD-B3/K3 guaranteed resolution is 5 g.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable sign-glitch correction on loadcell readings",
+    )
+    magnitude_tolerance_grams: float = Field(
+        default=2.0,
+        description="Max |magnitude| difference to treat a sign flip as a glitch",
+    )
+    min_magnitude_grams: float = Field(
+        default=5.0,
+        description="Readings below this magnitude are never corrected (zero-crossing noise)",
+    )
+    relatch_frames: int = Field(
+        default=3,
+        description="Accept an inverted sign as genuine after this many consecutive frames",
+    )
+    staleness_seconds: float = Field(
+        default=2.0,
+        description="Ignore previous reading older than this when detecting glitches",
+    )
+    quantize_grams: float = Field(
+        default=5.0,
+        description="Quantize output to this step (sensor resolution); 0 disables",
+    )
+    quantize_hysteresis_grams: float = Field(
+        default=1.0,
+        description="Extra margin before leaving the current quantization bin "
+        "(prevents flapping when a reading sits on a bin boundary)",
+    )
+
+    @field_validator(
+        "magnitude_tolerance_grams", "min_magnitude_grams", "staleness_seconds",
+        "quantize_hysteresis_grams",
+        mode="after",
+    )
+    def validate_non_negative(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError(f"Value must be non-negative, got {value}")
+        return value
+
+    @field_validator("relatch_frames", mode="after")
+    def validate_relatch_frames(cls, value: int) -> int:
+        if value < 2:
+            raise ValueError(f"relatch_frames must be >= 2, got {value}")
+        return value
+
+
 class Settings(BaseSettings):
     """Global application settings."""
 
@@ -155,6 +210,7 @@ class Settings(BaseSettings):
     serial: SerialModel = SerialModel()
     api: APIModel = APIModel()
     polling: PollingModel = PollingModel()
+    sanitize: SanitizeModel = SanitizeModel()
 
 
 if __name__ == "__main__":

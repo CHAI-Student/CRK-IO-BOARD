@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator, Dict, List
 from exceptions import DeviceError, ErrorCode, ValidationError
 from core.logging_config import PerformanceLogger, get_logger
 from services.io_board.protocol import build_request, parse_response
+from services.io_board.sanitizer import sanitize_loadcells
 from services.io_board.serial_io import fetch
 from services.io_board.io_types import (
     CommandType,
@@ -281,7 +282,7 @@ async def get_loadcells() -> List[str]:
             RequestSubcommand.LOADCELL_WEIGHTS,
             {}
         )
-        result = list(response.DATA.LOADCELLS)
+        result = sanitize_loadcells(list(response.DATA.LOADCELLS))
         logger.debug(f"Loadcell values retrieved: {result}")
         return result
 

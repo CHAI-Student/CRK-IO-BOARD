@@ -1,5 +1,27 @@
 # IO Board Module - Changelog
 
+## Version 2.0.2 - Loadcell Sanitizer (2026-07-16)
+
+### 🐛 Bug Workarounds
+
+#### Sign-glitch correction (issue #1)
+- Works around a firmware/MCU defect where ~12% of RQIW responses carry a
+  sign-inverted reading: magnitude preserved, corruption lasts one frame,
+  affected scan slot walks across channels (issue #1 capture: 781/782 glitch
+  runs single-frame, magnitude diff median 0.0 g).
+- Two-layer recovery in `get_loadcells()` (applies to `/loadcells`, SSE and
+  `/recording/data` alike): median-of-3 (one-frame latency) plus a
+  sign-continuity guard with relatch after 3 persistent frames.
+- Replay of the issue #1 capture: residual sign flips per channel 154 -> 1
+  (bootstrap only), negative-contaminated samples 79 -> 3.
+
+### ✨ New Features
+
+#### Resolution quantization (LABD-B3/K3: division 1 g, resolution 5 g)
+- Optional half-up quantization to the sensor's guaranteed resolution with
+  bin hysteresis against boundary flapping. `IO_BOARD__SANITIZE__*` env vars
+  configure all behavior; see README.PROD.md.
+
 ## Version 2.0.1 - Fractional Loadcell Values (2026-07-14)
 
 ### ✨ New Features
