@@ -109,6 +109,36 @@ class TestSignGlitchCorrection:
         assert out[0] == "-00962"
 
 
+class TestMedianFilterOption:
+    """median_filter=True (스로틀 비활성 시의 레거시 방어) 전용 동작."""
+
+    def test_glitch_during_real_step_not_mislatched(self):
+        # 실제 스텝(130->390)과 같은 프레임에 글리치(-390)가 겹치는 케이스 —
+        # 가드 단독으론 반전 락이 걸리지만 미디언은 흡수한다 (1프레임 지연 비용)
+        s = make(median_filter=True)
+        s.sanitize(frame("+00130"), now=0.0)
+        s.sanitize(frame("+00130"), now=0.1)
+        out3 = s.sanitize(frame("-00390"), now=0.2)   # 글리치+스텝 동시
+        out4 = s.sanitize(frame("+00390"), now=0.3)
+        out5 = s.sanitize(frame("+00390"), now=0.4)
+        assert out3[0] == "+00130"   # 글리치 프레임은 직전 값으로 흡수
+        assert out5[0] == "+00390"   # 스텝은 1프레임 지연 후 통과
+
+    def test_median_adds_one_frame_latency(self):
+        s = make(median_filter=True)
+        s.sanitize(frame("+00130"), now=0.0)
+        s.sanitize(frame("+00130"), now=0.1)
+        out = s.sanitize(frame("+00390"), now=0.2)
+        assert out[0] == "+00130"    # 미디언 창이 스텝을 한 프레임 지연
+
+    def test_default_has_no_latency(self):
+        s = make()
+        s.sanitize(frame("+00130"), now=0.0)
+        s.sanitize(frame("+00130"), now=0.1)
+        out = s.sanitize(frame("+00390"), now=0.2)
+        assert out[0] == "+00390"    # 기본(가드만): 지연 없음
+
+
 class TestQuantization:
     def test_half_up_rounding_matches_math_round(self):
         s = make(quantize=5.0)

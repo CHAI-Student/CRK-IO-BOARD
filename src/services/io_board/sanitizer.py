@@ -9,14 +9,20 @@ and the affected scan slot walks across channels (see issue #1 capture:
 
 Recovery, per channel, two layers:
 
-1. Median-of-3 over the raw readings (one-frame output latency). Because
-   glitches last exactly one frame, the median removes them regardless of
-   sign or magnitude — including a glitch that coincides with a genuine
-   weight step, where a sign-only rule would mis-latch.
-2. Sign-continuity guard on the median output: a value that is
-   approximately the negation of the previous output (magnitude within
-   tolerance) is corrected back, covering the rare two-frame glitch run
-   the median lets through. If the inverted sign persists for
+1. (Optional, ``median_filter``) Median-of-3 over the raw readings
+   (one-frame output latency). Because glitches last exactly one frame,
+   the median removes them regardless of sign or magnitude — including a
+   glitch that coincides with a genuine weight step, where a sign-only
+   rule would mis-latch. Since the request throttle (config
+   ``polling.loadcells_min_request_gap``, >= ~0.7s) keeps signs clean at
+   the source, this layer is OFF by default: at 0.8s sampling its
+   one-frame latency costs 0.8s of plateau timing for no remaining glitch
+   to remove.
+2. Sign-continuity guard (always on): a value that is approximately the
+   negation of the previous output (magnitude within tolerance) is
+   corrected back. This is the residual insurance if the ~0.7s corruption
+   threshold drifts with temperature/traffic, and its correction counter
+   doubles as recurrence telemetry. If the inverted sign persists for
    ``relatch_frames`` consecutive frames it is accepted as genuine.
 
 Optionally quantizes output to the sensor's guaranteed resolution
@@ -83,15 +89,18 @@ class LoadcellSanitizer:
             prev = self._prev[i]
             fresh = (ts - self._prev_ts[i]) <= cfg.staleness_seconds
 
-            # Layer 1: median-of-3 kills any single-frame outlier
+            # Layer 1 (optional): median-of-3 kills any single-frame outlier
             # (costs one frame of latency once the window is warm).
-            if not fresh:
-                self._window[i] = []
-            self._window[i].append(numeric)
-            if len(self._window[i]) > 3:
-                self._window[i].pop(0)
-            if len(self._window[i]) == 3:
-                value = sorted(self._window[i])[1]
+            if cfg.median_filter:
+                if not fresh:
+                    self._window[i] = []
+                self._window[i].append(numeric)
+                if len(self._window[i]) > 3:
+                    self._window[i].pop(0)
+                if len(self._window[i]) == 3:
+                    value = sorted(self._window[i])[1]
+                else:
+                    value = numeric
             else:
                 value = numeric
 

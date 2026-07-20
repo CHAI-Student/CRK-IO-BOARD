@@ -1,5 +1,16 @@
 # IO Board Module - Changelog
 
+## Version 2.0.4 - Median Filter Off by Default (2026-07-16)
+
+### 🔧 Changes
+
+- With the request throttle (2.0.3) keeping signs clean at the source, the
+  sanitizer's median-of-3 pre-filter is now opt-in
+  (IO_BOARD__SANITIZE__MEDIAN_FILTER, default false): at 0.8s sampling its
+  one-frame latency costs 0.8s of plateau timing with no remaining glitch
+  to remove. The zero-latency sign-continuity guard stays always-on as
+  insurance against threshold drift and as recurrence telemetry.
+
 ## Version 2.0.3 - Loadcell Request Throttle (2026-07-16)
 
 ### 🐛 Bug Workarounds

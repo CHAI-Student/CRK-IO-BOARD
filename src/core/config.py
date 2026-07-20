@@ -172,6 +172,13 @@ class SanitizeModel(BaseModel):
         default=True,
         description="Enable sign-glitch correction on loadcell readings",
     )
+    median_filter: bool = Field(
+        default=False,
+        description="Median-of-3 pre-filter (adds one frame of latency). "
+        "Legacy defense for sub-0.7s request spacing; unnecessary while "
+        "polling.loadcells_min_request_gap >= 0.75 keeps signs clean at the "
+        "source. Enable only if the throttle must be disabled.",
+    )
     magnitude_tolerance_grams: float = Field(
         default=2.0,
         description="Max |magnitude| difference to treat a sign flip as a glitch",

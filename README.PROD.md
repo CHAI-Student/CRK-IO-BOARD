@@ -107,6 +107,7 @@ IO 보드 상태를 주기적으로 읽어오는 폴링 서비스의 간격 설�
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
 | `IO_BOARD__SANITIZE__ENABLED` | `true` | 부호 글리치 보정 활성화 |
+| `IO_BOARD__SANITIZE__MEDIAN_FILTER` | `false` | 미디언-of-3 전처리 (1프레임 지연). 스로틀(`LOADCELLS_MIN_REQUEST_GAP`)을 끌 때만 켜십시오 |
 | `IO_BOARD__SANITIZE__MAGNITUDE_TOLERANCE_GRAMS` | `2.0` | 부호 반전을 글리치로 볼 크기 차 허용오차 (g) |
 | `IO_BOARD__SANITIZE__MIN_MAGNITUDE_GRAMS` | `5.0` | 이 크기 미만은 보정하지 않음 (영점 노이즈 보호) |
 | `IO_BOARD__SANITIZE__RELATCH_FRAMES` | `3` | 반전 부호가 이 프레임 수 연속되면 진짜 변화로 수용 |
@@ -114,8 +115,8 @@ IO 보드 상태를 주기적으로 읽어오는 폴링 서비스의 간격 설�
 | `IO_BOARD__SANITIZE__QUANTIZE_GRAMS` | `5.0` | 출력 양자화 스텝 (g, `0`이면 비활성) |
 | `IO_BOARD__SANITIZE__QUANTIZE_HYSTERESIS_GRAMS` | `1.0` | 양자화 bin 이탈에 필요한 추가 마진 (경계 플래핑 억제) |
 
-> **참고:** 미디언-of-3 1차 방어로 인해 출력이 원시 대비 1프레임(폴링 간격 1회)
-> 지연됩니다. 양자화는 값이 bin 경계에 걸릴 때 가짜 5g 스텝을 만들 수 있으므로,
+> **참고:** 부호 연속성 가드는 지연 없이 상시 동작하며, 보정 횟수가 로그에 남아
+> 부호 손상 재발(스로틀 임계 드리프트)의 텔레메트리 역할을 합니다. 양자화는 값이 bin 경계에 걸릴 때 가짜 5g 스텝을 만들 수 있으므로,
 > 추론 delta 정밀도가 우선이면 `QUANTIZE_GRAMS=0`으로 끄고 판정 계층에서
 > 양자화하는 구성도 고려하십시오.
 
