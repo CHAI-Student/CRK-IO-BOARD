@@ -6,8 +6,10 @@ commands from low-level protocol details. All functions include comprehensive
 type hints, docstrings, and error handling.
 """
 
+import asyncio
+import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Dict, List
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from exceptions import DeviceError, ErrorCode, ValidationError
 from core.logging_config import PerformanceLogger, get_logger
@@ -261,30 +263,68 @@ async def get_product_info() -> ProductInfoData:
         return result
 
 
+# Loadcell request throttle. The firmware reports garbage signs when RQIW
+# requests are spaced closer than ~0.7s (measured sign duty on a negative
+# true value: 0.09s->0.89, 0.5s->0.25, 0.6s->0.03, 0.7s->0.00 — see
+# docs/FIRMWARE_SIGN_GLITCH_REQUEST.md). All consumers (HTTP, polling
+# service, health checks) share one gate: requests arriving before the
+# minimum gap are served from the cached frame.
+_loadcell_min_gap: float = 0.0
+_loadcell_cache: Optional[List[str]] = None
+_loadcell_cache_ts: float = 0.0
+_loadcell_gate = asyncio.Lock()
+
+
+def configure_loadcell_throttle(min_gap: float) -> None:
+    """Configure the loadcell request throttle. Call once during startup."""
+    global _loadcell_min_gap, _loadcell_cache, _loadcell_cache_ts
+    _loadcell_min_gap = min_gap
+    _loadcell_cache = None
+    _loadcell_cache_ts = 0.0
+    logger.info(
+        f"Loadcell throttle {'enabled: min gap %.2fs' % min_gap if min_gap > 0 else 'disabled'}"
+    )
+
+
 async def get_loadcells() -> List[str]:
     """
     Get current loadcell weight readings.
-    
+
+    Serial requests are globally throttled to one per configured minimum
+    gap; faster calls return the cached (sanitized) frame.
+
     Returns:
         List of 10 loadcell readings (6 characters each).
         Format: "+XXXXX" or "-XXXXX" for valid readings,
                 "EEEEEE" for error, "VVVVVV" for invalid
-        
+
     Raises:
         DeviceError: If getting loadcell data fails
         ProtocolError: If protocol communication fails
         SerialCommunicationError: If serial communication fails
     """
-    async with _session('get_loadcells'):
-        logger.debug("Getting loadcell values")
-        response = await _send_command(
-            CommandType.REQUEST,
-            RequestSubcommand.LOADCELL_WEIGHTS,
-            {}
-        )
-        result = sanitize_loadcells(list(response.DATA.LOADCELLS))
-        logger.debug(f"Loadcell values retrieved: {result}")
-        return result
+    global _loadcell_cache, _loadcell_cache_ts
+    async with _loadcell_gate:
+        if (
+            _loadcell_min_gap > 0
+            and _loadcell_cache is not None
+            and time.monotonic() - _loadcell_cache_ts < _loadcell_min_gap
+        ):
+            logger.debug("Loadcell values served from throttle cache")
+            return list(_loadcell_cache)
+
+        async with _session('get_loadcells'):
+            logger.debug("Getting loadcell values")
+            response = await _send_command(
+                CommandType.REQUEST,
+                RequestSubcommand.LOADCELL_WEIGHTS,
+                {}
+            )
+            result = sanitize_loadcells(list(response.DATA.LOADCELLS))
+            _loadcell_cache = list(result)
+            _loadcell_cache_ts = time.monotonic()
+            logger.debug(f"Loadcell values retrieved: {result}")
+            return result
 
 
 async def get_status() -> IOStatusData:

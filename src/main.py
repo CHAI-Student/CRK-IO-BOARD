@@ -51,6 +51,9 @@ async def lifespan(app: FastAPI):
     configure_serial(settings.serial)
     configure_sanitizer(settings.sanitize)
 
+    import services.io_board.commands as commands
+    commands.configure_loadcell_throttle(settings.polling.loadcells_min_request_gap)
+
     loadcells_data_source = data_sources.LoadCellsDataSource()
     loadcells_polling_service = polling_service.PollingService(
         data_source=loadcells_data_source,

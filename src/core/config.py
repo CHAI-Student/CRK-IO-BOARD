@@ -129,18 +129,34 @@ class PollingModel(BaseModel):
     """Polling service configuration settings."""
 
     loadcells_poll_interval: float = Field(
-        default=0.099,
-        description="Loadcell poll interval in seconds",
+        default=0.8,
+        description="Loadcell poll interval in seconds. Keep above "
+        "loadcells_min_request_gap so the recording stream gets fresh (not "
+        "cached) frames.",
     )
     io_status_poll_interval: float = Field(
         default=0.5,
         description="IO status poll interval in seconds",
+    )
+    loadcells_min_request_gap: float = Field(
+        default=0.75,
+        description="Minimum spacing between loadcell serial requests; calls "
+        "arriving sooner are served from cache. The firmware reports garbage "
+        "signs when RQIW requests are spaced closer than ~0.7s (measured "
+        "duty: 0.09s->0.89, 0.5s->0.25, 0.6s->0.03, 0.7s->0.00 — see "
+        "docs/FIRMWARE_SIGN_GLITCH_REQUEST.md). 0 disables throttling.",
     )
 
     @field_validator("loadcells_poll_interval", "io_status_poll_interval", mode="after")
     def validate_intervals(cls, value: float) -> float:
         if value <= 0:
             raise ValueError(f"Poll interval must be positive, got {value}")
+        return value
+
+    @field_validator("loadcells_min_request_gap", mode="after")
+    def validate_min_request_gap(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError(f"Min request gap must be non-negative, got {value}")
         return value
 
 

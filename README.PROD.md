@@ -85,11 +85,16 @@ IO 보드 상태를 주기적으로 읽어오는 폴링 서비스의 간격 설�
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
-| `IO_BOARD__POLLING__LOADCELLS_POLL_INTERVAL` | `0.099` | 로드셀 데이터 폴링 간격 (초, 양수만 허용) |
+| `IO_BOARD__POLLING__LOADCELLS_POLL_INTERVAL` | `0.8` | 로드셀 데이터 폴링 간격 (초, 양수만 허용). `LOADCELLS_MIN_REQUEST_GAP`보다 커야 recording이 캐시가 아닌 신선한 프레임을 받습니다 |
 | `IO_BOARD__POLLING__IO_STATUS_POLL_INTERVAL` | `0.5` | IO 상태 폴링 간격 (초, 양수만 허용) |
+| `IO_BOARD__POLLING__LOADCELLS_MIN_REQUEST_GAP` | `0.75` | 로드셀 시리얼 요청 최소 간격 (초). 이보다 빠른 호출은 캐시로 응답. `0`이면 비활성 |
 
-> **참고:** 폴링 간격을 지나치게 짧게 설정하면 시리얼 통신 부하가 증가할 수 있습니다.  
-> 시스템 부하 및 응답 요건을 고려하여 적절한 값으로 조정하십시오.
+> **경고:** 펌웨어가 로드셀 요청 간격 ~0.7초 미만에서 **부호를 잘못 보고**합니다
+> (실측 duty: 0.09s→0.89, 0.5s→0.25, 0.6s→0.03, 0.7s→0.00 —
+> `docs/FIRMWARE_SIGN_GLITCH_REQUEST.md` 참조). `LOADCELLS_MIN_REQUEST_GAP`을
+> 0.7 미만으로 낮추거나 끄면 부호 손상이 재발합니다. 기존 배포에서
+> `LOADCELLS_POLL_INTERVAL`을 0.12 등으로 명시 설정했다면 **env 오버라이드를
+> 제거하거나 0.8 이상으로 변경**해야 합니다.
 
 ---
 

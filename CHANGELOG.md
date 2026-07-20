@@ -1,5 +1,22 @@
 # IO Board Module - Changelog
 
+## Version 2.0.3 - Loadcell Request Throttle (2026-07-16)
+
+### 🐛 Bug Workarounds
+
+#### Sign corruption is request-rate dependent (issue #1, follow-up)
+- Measured: the firmware reports correct signs only when RQIW requests are
+  spaced >= ~0.7s (sign duty on a negative true value: 0.09s->0.89,
+  0.5s->0.25, 0.6s->0.03, 0.7s->0.00).
+- Added a global loadcell request throttle in get_loadcells(): serial
+  requests are limited to one per IO_BOARD__POLLING__LOADCELLS_MIN_REQUEST_GAP
+  (default 0.75s); faster calls from any consumer (HTTP, SSE polling, health)
+  are served from the cached frame, so ad-hoc traffic cannot re-trigger the
+  corruption.
+- Default loadcells_poll_interval raised 0.099 -> 0.8 so the recording
+  stream receives fresh frames. Existing env overrides (e.g. 0.12) must be
+  removed or raised.
+
 ## Version 2.0.2 - Loadcell Sanitizer (2026-07-16)
 
 ### 🐛 Bug Workarounds
