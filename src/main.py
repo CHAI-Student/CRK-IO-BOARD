@@ -29,6 +29,7 @@ from core.logging_config import (
 )
 from exceptions import IOBoardError
 from services.polling import data_sources, polling_service
+from services.io_board.sanitizer import configure_sanitizer
 from services.io_board.serial_io import configure_serial
 
 logger = get_logger(__name__)
@@ -48,6 +49,10 @@ async def lifespan(app: FastAPI):
     setup_logging(settings.api.log_level.upper())
 
     configure_serial(settings.serial)
+    configure_sanitizer(settings.sanitize)
+
+    import services.io_board.commands as commands
+    commands.configure_loadcell_throttle(settings.polling.loadcells_min_request_gap)
 
     loadcells_data_source = data_sources.LoadCellsDataSource()
     loadcells_polling_service = polling_service.PollingService(

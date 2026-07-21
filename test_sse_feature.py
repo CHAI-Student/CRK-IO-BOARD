@@ -115,6 +115,37 @@ def test_kalman_filter():
     print("✓ KalmanFilter tests passed")
 
 
+def test_fractional_values():
+    """Fractional readings (sensor resolution 0.1) parse and format correctly."""
+    print("Testing fractional loadcell values...")
+
+    # NoFilter: fractional raw passes through, numeric parsed
+    f = create_filter(FilterMethod.NONE)
+    result, numeric = f.filter("+123.4")
+    assert result == "+123.4" and numeric == 123.4, f"Got {result}, {numeric}"
+    result, numeric = f.filter("-079.5")
+    assert numeric == -79.5, f"Got {numeric}"
+
+    # Exponential: formatted output preserves one decimal for |v| < 1000
+    f = create_filter(FilterMethod.EXPONENTIAL, alpha=1.0)  # passthrough
+    result, numeric = f.filter("+123.4")
+    assert result == "+123.4", f"Expected '+123.4', got '{result}'"
+    result, numeric = f.filter("-079.5")
+    assert result == "-079.5", f"Expected '-079.5', got '{result}'"
+
+    # Legacy integer fallback for values that cannot carry a decimal
+    result, numeric = f.filter("+12345")
+    assert result == "+12345", f"Expected '+12345', got '{result}'"
+
+    # Smoothing between fractional values stays at 0.1-formatted output
+    f = create_filter(FilterMethod.EXPONENTIAL, alpha=0.5)
+    f.filter("+100.0")
+    result, numeric = f.filter("+100.5")
+    assert result == "+100.2", f"Expected '+100.2', got '{result}'"  # 100.25 -> 100.2
+
+    print("✓ Fractional value tests passed")
+
+
 def test_change_detector_basic():
     """Test basic change detection."""
     print("Testing LoadcellChangeDetector...")
@@ -225,6 +256,7 @@ def run_all_tests():
         test_no_filter()
         test_exponential_filter()
         test_kalman_filter()
+        test_fractional_values()
         test_change_detector_basic()
         test_uncertainty_detection()
         test_filtered_threshold_scope()

@@ -85,11 +85,40 @@ IO 보드 상태를 주기적으로 읽어오는 폴링 서비스의 간격 설�
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
-| `IO_BOARD__POLLING__LOADCELLS_POLL_INTERVAL` | `0.099` | 로드셀 데이터 폴링 간격 (초, 양수만 허용) |
+| `IO_BOARD__POLLING__LOADCELLS_POLL_INTERVAL` | `0.8` | 로드셀 데이터 폴링 간격 (초, 양수만 허용). `LOADCELLS_MIN_REQUEST_GAP`보다 커야 recording이 캐시가 아닌 신선한 프레임을 받습니다 |
 | `IO_BOARD__POLLING__IO_STATUS_POLL_INTERVAL` | `0.5` | IO 상태 폴링 간격 (초, 양수만 허용) |
+| `IO_BOARD__POLLING__LOADCELLS_MIN_REQUEST_GAP` | `0.75` | 로드셀 시리얼 요청 최소 간격 (초). 이보다 빠른 호출은 캐시로 응답. `0`이면 비활성 |
 
-> **참고:** 폴링 간격을 지나치게 짧게 설정하면 시리얼 통신 부하가 증가할 수 있습니다.  
-> 시스템 부하 및 응답 요건을 고려하여 적절한 값으로 조정하십시오.
+> **경고:** 펌웨어가 로드셀 요청 간격 ~0.7초 미만에서 **부호를 잘못 보고**합니다
+> (실측 duty: 0.09s→0.89, 0.5s→0.25, 0.6s→0.03, 0.7s→0.00 —
+> `docs/FIRMWARE_SIGN_GLITCH_REQUEST.md` 참조). `LOADCELLS_MIN_REQUEST_GAP`을
+> 0.7 미만으로 낮추거나 끄면 부호 손상이 재발합니다. 기존 배포에서
+> `LOADCELLS_POLL_INTERVAL`을 0.12 등으로 명시 설정했다면 **env 오버라이드를
+> 제거하거나 0.8 이상으로 변경**해야 합니다.
+
+---
+
+### 4. 로드셀 새니타이저 설정 (`IO_BOARD__SANITIZE__*`)
+
+펌웨어 부호 글리치(크기 보존·1프레임 부호 반전, issue #1) 보정과
+센서 보증 분해능(5g) 양자화 설정입니다. `get_loadcells()` 관문에 적용되어
+`/loadcells`, SSE, `/recording/data` 모두 동일하게 반영됩니다.
+
+| 환경 변수 | 기본값 | 설명 |
+|---|---|---|
+| `IO_BOARD__SANITIZE__ENABLED` | `true` | 부호 글리치 보정 활성화 |
+| `IO_BOARD__SANITIZE__MEDIAN_FILTER` | `false` | 미디언-of-3 전처리 (1프레임 지연). 스로틀(`LOADCELLS_MIN_REQUEST_GAP`)을 끌 때만 켜십시오 |
+| `IO_BOARD__SANITIZE__MAGNITUDE_TOLERANCE_GRAMS` | `2.0` | 부호 반전을 글리치로 볼 크기 차 허용오차 (g) |
+| `IO_BOARD__SANITIZE__MIN_MAGNITUDE_GRAMS` | `5.0` | 이 크기 미만은 보정하지 않음 (영점 노이즈 보호) |
+| `IO_BOARD__SANITIZE__RELATCH_FRAMES` | `3` | 반전 부호가 이 프레임 수 연속되면 진짜 변화로 수용 |
+| `IO_BOARD__SANITIZE__STALENESS_SECONDS` | `2.0` | 이보다 오래된 직전 값은 글리치 판정에 사용 안 함 |
+| `IO_BOARD__SANITIZE__QUANTIZE_GRAMS` | `5.0` | 출력 양자화 스텝 (g, `0`이면 비활성) |
+| `IO_BOARD__SANITIZE__QUANTIZE_HYSTERESIS_GRAMS` | `1.0` | 양자화 bin 이탈에 필요한 추가 마진 (경계 플래핑 억제) |
+
+> **참고:** 부호 연속성 가드는 지연 없이 상시 동작하며, 보정 횟수가 로그에 남아
+> 부호 손상 재발(스로틀 임계 드리프트)의 텔레메트리 역할을 합니다. 양자화는 값이 bin 경계에 걸릴 때 가짜 5g 스텝을 만들 수 있으므로,
+> 추론 delta 정밀도가 우선이면 `QUANTIZE_GRAMS=0`으로 끄고 판정 계층에서
+> 양자화하는 구성도 고려하십시오.
 
 ---
 

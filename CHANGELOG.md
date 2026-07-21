@@ -1,5 +1,68 @@
 # IO Board Module - Changelog
 
+## Version 2.0.4 - Median Filter Off by Default (2026-07-16)
+
+### 🔧 Changes
+
+- With the request throttle (2.0.3) keeping signs clean at the source, the
+  sanitizer's median-of-3 pre-filter is now opt-in
+  (IO_BOARD__SANITIZE__MEDIAN_FILTER, default false): at 0.8s sampling its
+  one-frame latency costs 0.8s of plateau timing with no remaining glitch
+  to remove. The zero-latency sign-continuity guard stays always-on as
+  insurance against threshold drift and as recurrence telemetry.
+
+## Version 2.0.3 - Loadcell Request Throttle (2026-07-16)
+
+### 🐛 Bug Workarounds
+
+#### Sign corruption is request-rate dependent (issue #1, follow-up)
+- Measured: the firmware reports correct signs only when RQIW requests are
+  spaced >= ~0.7s (sign duty on a negative true value: 0.09s->0.89,
+  0.5s->0.25, 0.6s->0.03, 0.7s->0.00).
+- Added a global loadcell request throttle in get_loadcells(): serial
+  requests are limited to one per IO_BOARD__POLLING__LOADCELLS_MIN_REQUEST_GAP
+  (default 0.75s); faster calls from any consumer (HTTP, SSE polling, health)
+  are served from the cached frame, so ad-hoc traffic cannot re-trigger the
+  corruption.
+- Default loadcells_poll_interval raised 0.099 -> 0.8 so the recording
+  stream receives fresh frames. Existing env overrides (e.g. 0.12) must be
+  removed or raised.
+
+## Version 2.0.2 - Loadcell Sanitizer (2026-07-16)
+
+### 🐛 Bug Workarounds
+
+#### Sign-glitch correction (issue #1)
+- Works around a firmware/MCU defect where ~12% of RQIW responses carry a
+  sign-inverted reading: magnitude preserved, corruption lasts one frame,
+  affected scan slot walks across channels (issue #1 capture: 781/782 glitch
+  runs single-frame, magnitude diff median 0.0 g).
+- Two-layer recovery in `get_loadcells()` (applies to `/loadcells`, SSE and
+  `/recording/data` alike): median-of-3 (one-frame latency) plus a
+  sign-continuity guard with relatch after 3 persistent frames.
+- Replay of the issue #1 capture: residual sign flips per channel 154 -> 1
+  (bootstrap only), negative-contaminated samples 79 -> 3.
+
+### ✨ New Features
+
+#### Resolution quantization (LABD-B3/K3: division 1 g, resolution 5 g)
+- Optional half-up quantization to the sensor's guaranteed resolution with
+  bin hysteresis against boundary flapping. `IO_BOARD__SANITIZE__*` env vars
+  configure all behavior; see README.PROD.md.
+
+## Version 2.0.1 - Fractional Loadcell Values (2026-07-14)
+
+### ✨ New Features
+
+#### Fractional Loadcell Values (sensor resolution 0.1)
+- Readings such as `+123.4` (fractional firmware) parse transparently; filtered
+  output preserves one decimal place when it fits the 6-character field and
+  falls back to the legacy integer form for |value| >= 1000, so devices on
+  pre-fractional firmware are unaffected.
+- `loadcell.change` payload values (`old_values`/`new_values`/`deltas`) are
+  rounded to 0.1 (sensor resolution); threshold comparisons still use full
+  floats internally.
+
 ## Version 2.0.0 - Enterprise Refactor (2026-01-17)
 
 ### 🎉 Major Changes

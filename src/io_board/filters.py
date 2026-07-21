@@ -79,18 +79,26 @@ class LoadcellFilter(ABC):
     def _format_value(self, numeric: float) -> str:
         """
         Format numeric value back to 6-character string.
-        
+
+        Sensor resolution is 0.1 (fractional firmware reports readings such
+        as "+123.4"), so one decimal place is preserved whenever it fits the
+        6-character field. Values with |value| >= 1000 cannot carry a decimal
+        in 6 characters and fall back to the legacy integer format - this
+        also keeps devices on pre-fractional firmware (integer readings up
+        to 99999) working unchanged.
+
         Args:
             numeric: Numeric loadcell value
-        
+
         Returns:
-            6-character formatted string (e.g., "+12345")
+            6-character formatted string (e.g., "+123.4", "-079.5", "+12345")
         """
         sign = "+" if numeric >= 0 else "-"
-        abs_val = abs(int(numeric))
-        # Clamp to 5 digits
-        abs_val = min(abs_val, 99999)
-        return f"{sign}{abs_val:05d}"
+        abs_val = round(abs(numeric), 1)
+        if abs_val < 1000:
+            return f"{sign}{abs_val:05.1f}"
+        # Legacy integer fallback (clamped to 5 digits)
+        return f"{sign}{min(int(abs_val), 99999):05d}"
 
 
 class NoFilter(LoadcellFilter):
