@@ -1,12 +1,13 @@
-"""
-FastAPI REST API for IO Board device control.
+"""IO Board 디바이스 제어용 FastAPI 서비스 진입점.
 
-This module provides a RESTful API interface to the IO Board device with:
-- Comprehensive endpoint documentation
-- Standard error responses
-- Request/response validation
-- Structured logging
-- Correlation ID tracking
+애플리케이션 lifespan에서 serial/sanitizer/throttle을 설정하고
+polling·recording·error state management 서비스를 기동한다. 제공 기능:
+- 표준 에러 응답과 request/response 검증
+- correlation ID 추적이 포함된 구조화 로깅
+- SSE streaming을 위한 graceful shutdown (uvicorn Server 교체)
+
+주의: graceful shutdown을 위해 uvicorn Server 구현을 교체해야 하므로
+반드시 메인 프로그램으로 직접 실행해야 한다 (import 시 종료).
 """
 
 import asyncio
@@ -28,19 +29,25 @@ from core.logging_config import (
     setup_logging,
 )
 from exceptions import IOBoardError
+from io_board import __version__
 from services.polling import data_sources, polling_service
 from services.io_board.sanitizer import configure_sanitizer
 from services.io_board.serial_io import configure_serial
 
 logger = get_logger(__name__)
 
-# Shared shutdown signal for cooperative streaming stop
+# streaming 협조적 중단을 위한 공유 shutdown 신호
 stop_event = asyncio.Event()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan context manager."""
+    """애플리케이션 lifespan context manager.
+
+    startup: serial/sanitizer/throttle 설정, polling·recording·
+    error state management 서비스 시작.
+    shutdown: 역순으로 서비스 정지.
+    """
 
     app.state.stop_event = stop_event
 
@@ -83,6 +90,8 @@ async def lifespan(app: FastAPI):
     error_state_management_service = error_state_mgmt.ErrorStateManagementService(
         polling_service=io_status_polling_service,
         name="ErrorStateManagement",
+        door_open_error_seconds=settings.health.door_open_error_seconds,
+        deadbolt_apply_timeout_seconds=settings.health.deadbolt_apply_timeout_seconds,
     )
 
     app.state.recording_services = {
@@ -90,20 +99,20 @@ async def lifespan(app: FastAPI):
         "error_state_management": error_state_management_service,
     }
 
-    # Start polling services
+    # polling 서비스 시작
     await loadcells_polling_service.start()
     await io_status_polling_service.start()
 
-    # Start recording services
+    # recording 서비스 시작
     await loadcells_recording_service.start()
     await error_state_management_service.start()
     try:
         yield
     finally:
-        # Stop recording services
+        # recording 서비스 정지
         await loadcells_recording_service.stop()
         await error_state_management_service.stop()
-        # Stop polling services
+        # polling 서비스 정지
         await loadcells_polling_service.stop()
         await io_status_polling_service.stop()
         logger.info("IO Board Control Service Stopped")
@@ -112,29 +121,29 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="IO Board Control API",
     description="REST API for controlling IO Board device with loadcells, door locks, and sensors",
-    version="2.0.0",
+    # 버전 단일 소스: io_board.__version__ (CHANGELOG.md 최신 버전과 일치)
+    version=__version__,
     lifespan=lifespan,
 )
 
 
 @app.middleware("http")
 async def logging_middleware(request: Request, call_next):
-    """
-    Middleware for request/response logging with correlation IDs.
+    """correlation ID가 포함된 request/response 로깅 middleware.
 
-    Logs all incoming requests and outgoing responses with timing information
-    and correlation IDs for request tracing.
+    모든 요청/응답을 소요 시간과 함께 로깅하고, 요청 추적을 위한
+    correlation ID를 응답 헤더에 추가한다.
     """
-    # Generate correlation ID for this request
+    # 이 요청의 correlation ID 생성
     correlation_id = set_correlation_id()
 
-    # Log incoming request
+    # 수신 요청 로깅
     logger.info(
         f"Request started: method={request.method} path={request.url.path} "
         f"client={request.client.host if request.client else 'unknown'}"
     )
 
-    # Log request body for POST/PUT/PATCH
+    # POST/PUT/PATCH의 request body 로깅
     if request.method in ["POST", "PUT", "PATCH"]:
         try:
             body = await request.body()
@@ -143,15 +152,15 @@ async def logging_middleware(request: Request, call_next):
         except Exception:
             pass
 
-    # Process request and measure time
+    # 요청 처리 및 소요 시간 측정
     try:
         with PerformanceLogger(logger, "request", path=request.url.path):
             response = await call_next(request)
 
-        # Log response
+        # 응답 로깅
         logger.info(f"Request completed: status={response.status_code}")
 
-        # Add correlation ID to response headers
+        # 응답 헤더에 correlation ID 추가
         response.headers["X-Correlation-ID"] = correlation_id
 
         return response
@@ -161,10 +170,9 @@ async def logging_middleware(request: Request, call_next):
 
 @app.exception_handler(IOBoardError)
 async def ioboard_error_handler(request: Request, exc: IOBoardError) -> JSONResponse:
-    """
-    Global exception handler for IO Board errors.
+    """IO Board 에러 전역 exception handler.
 
-    Converts all IOBoardError exceptions to standard JSON error responses.
+    모든 IOBoardError 예외를 표준 JSON 에러 응답으로 변환한다.
     """
     logger.error(
         f"IO Board error: {exc.error_code.value} - {exc.message}", exc_info=exc
@@ -180,10 +188,9 @@ async def ioboard_error_handler(request: Request, exc: IOBoardError) -> JSONResp
 async def validation_error_handler(
     request: Request, exc: PydanticValidationError
 ) -> JSONResponse:
-    """
-    Global exception handler for Pydantic validation errors.
+    """Pydantic 검증 에러 전역 exception handler.
 
-    Converts validation errors to standard JSON error responses.
+    검증 에러를 표준 JSON 에러 응답으로 변환한다.
     """
     logger.warning(f"Validation error: {exc.errors()}")
 
@@ -199,11 +206,10 @@ async def validation_error_handler(
 
 @app.exception_handler(Exception)
 async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Global exception handler for unexpected errors.
+    """예기치 못한 에러의 전역 exception handler.
 
-    Logs the full exception and returns a generic error response
-    without leaking internal details.
+    전체 예외를 로깅하고, 내부 세부사항을 노출하지 않는 일반 에러
+    응답을 반환한다.
     """
     logger.error(f"Unexpected error: {exc}", exc_info=exc)
 
@@ -229,10 +235,10 @@ app.include_router(sse.router)
 
 
 class GracefulShutdownServer(Server):
-    """Uvicorn server subclass that handles graceful shutdown."""
+    """graceful shutdown을 처리하는 uvicorn Server 서브클래스."""
 
     async def shutdown(self, *args, **kwargs) -> None:
-        """Handle server shutdown by setting the stop event."""
+        """stop event를 설정해 SSE 등 streaming 소비자에게 종료를 알린다."""
         logger.info("Server shutdown initiated, stopping services...")
         stop_event.set()
         await super().shutdown(*args, **kwargs)
@@ -257,7 +263,7 @@ if __name__ == "__main__":
         pass
 
 else:
-    # To support graceful shutdown, It is mandatory to replace uvicorn server implementation
-    # So if this module is imported, we exit with an error
+    # graceful shutdown을 위해 uvicorn Server 구현 교체가 필수이므로
+    # 이 모듈이 import되면 에러로 종료한다
     print("This module is intended to be run as the main program.")
     exit(1)

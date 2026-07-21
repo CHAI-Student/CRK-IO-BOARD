@@ -1,6 +1,8 @@
 [project]
 name = "crk-io-board"
-version = "0.1.0"
+# 버전 단일 소스는 src/io_board/__init__.py의 __version__ (CHANGELOG.md 최신
+# 버전과 일치). 이 값도 동일하게 유지할 것.
+version = "2.0.4"
 description = "IO Board interface for CRK"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -20,3 +22,8 @@ dev = [
     "construct-typing>=0.7.0",
     "pytest>=9.0.2",
 ]
+
+[tool.pytest.ini_options]
+# 각 테스트 파일의 sys.path 조작 대신 여기서 src/를 import 경로에 추가한다.
+pythonpath = ["src"]
+testpaths = ["tests"]
