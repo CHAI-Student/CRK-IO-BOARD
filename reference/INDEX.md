@@ -33,7 +33,7 @@ io_board/
 ├── REFACTORING_SUMMARY.md        # Summary of changes
 ├── quickstart_windows.bat        # Windows quick start
 ├── quickstart_linux.sh           # Linux/Mac quick start
-└── requirements.txt              # Python dependencies (updated)
+└── pyproject.toml / uv.lock      # Python dependencies (managed with uv)
 ```
 
 ## 📚 Documentation Files

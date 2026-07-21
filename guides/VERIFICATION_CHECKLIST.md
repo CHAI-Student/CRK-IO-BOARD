@@ -49,18 +49,13 @@ Check that all files are present:
 ### Utility Files
 - [ ] `quickstart_windows.bat`
 - [ ] `quickstart_linux.sh`
-- [ ] `requirements.txt` (updated)
+- [ ] `pyproject.toml` / `uv.lock` (dependencies, managed with uv)
 
 ## ✅ Installation Verification
 
-- [ ] Dependencies installed
+- [ ] Dependencies installed (dev tools included)
   ```bash
-  pip install fastapi uvicorn pydantic pyserial pyserial-asyncio construct
-  ```
-
-- [ ] Test dependencies installed (optional)
-  ```bash
-  pip install pytest pytest-asyncio pytest-cov
+  uv sync
   ```
 
 - [ ] No import errors

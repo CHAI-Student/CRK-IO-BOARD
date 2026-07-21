@@ -1,8 +1,8 @@
 ## Operations, Configuration, and Logging Runbook
 
 ### How to Run
-- Install deps: `pip install -r requirements.txt` (or `requirements.dev.txt` for tests).
-- Start service (Windows example): `python src/main.py` (launches FastAPI with uvicorn via `serve_api`).
+- Install deps: `uv sync` (dependencies are managed solely with uv — `pyproject.toml` + `uv.lock`; dev tools included).
+- Start service: `uv run src/main.py` (launches FastAPI with uvicorn).
 - API listens on `host`/`port` from config; browse `/docs` if generated at runtime or hit REST endpoints directly.
 
 ### Configuration (env-driven)

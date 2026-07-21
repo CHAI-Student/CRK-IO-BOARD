@@ -1,11 +1,11 @@
 ## Usage Guide and Testing
 
 ### Quickstart
-1) Install dependencies: `pip install -r requirements.txt`
+1) Install dependencies: `uv sync`
 2) Export env if needed (Windows example):
-   - `set IO_BOARD_PORT=COM3`
-   - `set IO_BOARD_API_PORT=8000`
-3) Run service: `python src/main.py`
+   - `set IO_BOARD__SERIAL__PORT=COM3`
+   - `set IO_BOARD__API__PORT=8000`
+3) Run service: `uv run src/main.py`
 4) Call endpoints with curl/httpie or open browser for REST.
 
 ### Common REST Calls

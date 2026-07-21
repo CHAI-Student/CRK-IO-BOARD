@@ -30,16 +30,13 @@ src/io_board/
 
 ## Installation
 
-### Dependencies
+Dependencies are managed solely with [uv](https://docs.astral.sh/uv/)
+(`pyproject.toml` + `uv.lock`).
+
+### Dependencies (dev tools included)
 
 ```bash
-pip install fastapi uvicorn pydantic pyserial pyserial-asyncio construct
-```
-
-### Development Dependencies
-
-```bash
-pip install pytest pytest-asyncio pytest-cov
+uv sync
 ```
 
 ## Configuration

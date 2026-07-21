@@ -7,14 +7,9 @@
 mkdir tests
 ```
 
-### 2. Install Test Dependencies
+### 2. Install Dependencies (dev tools included, managed with uv)
 ```bash
-pip install pytest pytest-asyncio pytest-cov
-```
-
-### 3. Install IO Board Dependencies
-```bash
-pip install fastapi uvicorn pydantic pyserial pyserial-asyncio construct
+uv sync
 ```
 
 ## Test Files
@@ -99,13 +94,8 @@ Add to your CI pipeline:
 
 ```yaml
 - name: Install dependencies
-  run: |
-    pip install pytest pytest-asyncio pytest-cov
-    pip install -r requirements.txt
+  run: uv sync
 
 - name: Run tests
-  run: pytest --cov=src.io_board tests/
-
-- name: Generate coverage report
-  run: pytest --cov=src.io_board --cov-report=xml tests/
+  run: uv run pytest tests/
 ```

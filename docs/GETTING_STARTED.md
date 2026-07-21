@@ -30,16 +30,13 @@ src/io_board/
 
 ## Installation
 
-### Dependencies
+Dependencies are managed solely with [uv](https://docs.astral.sh/uv/)
+(`pyproject.toml` + `uv.lock`).
+
+### Dependencies (dev tools included)
 
 ```bash
-pip install fastapi uvicorn pydantic pyserial pyserial-asyncio construct
-```
-
-### Development Dependencies
-
-```bash
-pip install pytest pytest-asyncio pytest-cov
+uv sync
 ```
 
 ## Configuration
@@ -263,11 +260,11 @@ For issues and questions, please open a GitHub issue.
 ## Usage Guide and Testing
 
 ### Quickstart
-1) Install dependencies: `pip install -r requirements.txt`
+1) Install dependencies: `uv sync`
 2) Export env if needed (Windows example):
-   - `set IO_BOARD_PORT=COM3`
-   - `set IO_BOARD_API_PORT=8000`
-3) Run service: `python src/main.py`
+   - `set IO_BOARD__SERIAL__PORT=COM3`
+   - `set IO_BOARD__API__PORT=8000`
+3) Run service: `uv run src/main.py`
 4) Call endpoints with curl/httpie or open browser for REST.
 
 ### Common REST Calls
