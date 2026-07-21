@@ -1,11 +1,25 @@
+"""SSE streaming router — loadcell/door 상태의 통합 Server-Sent Events.
+
+polling 서비스를 구독해 5가지 이벤트를 하나의 stream으로 multiplexing한다:
+- loadcell.update: 주기적 loadcell 판독값 (raw + filtered)
+- loadcell.change: threshold 초과 변화 감지 (도난 감지 이벤트)
+- loadcell.uncertainty: 센서 에러/IO board 장애 (보안 이벤트)
+- door.update: 주기적 door/deadbolt 상태
+- error: stream 수준 에러
+
+query 파라미터로 filter(EMA/Kalman), threshold, threshold scope를
+클라이언트별로 설정할 수 있다.
+"""
+
 import asyncio
 import json
 import logging
-from datetime import datetime
+from time import time
 
 from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from core.time_utils import unix_to_iso8601
 from io_board.events import LoadcellChangeDetector
 from exceptions import IOBoardError
 from io_board.filters import FilterMethod, ThresholdScope
@@ -462,13 +476,12 @@ async def handle_unified_sse(
         examples=["filtered"],
     ),
 ) -> JSONResponse | StreamingResponse:
-    """
-    Unified SSE endpoint for streaming loadcell and door status.
+    """loadcell/door 상태 streaming을 위한 통합 SSE 엔드포인트.
 
-    Supports multiple concurrent data streams,
-    configurable filtering, and threshold-based change detection.
+    다중 동시 stream, 설정 가능한 filtering, threshold 기반 변화 감지를
+    지원한다.
     """
-    # Parse and validate streams parameter
+    # streams 파라미터 파싱 및 검증
     enabled_streams = [s.strip() for s in streams.split(",") if s.strip()]
     valid_streams = {"loadcells", "doors"}
     invalid_streams = set(enabled_streams) - valid_streams
@@ -498,12 +511,12 @@ async def handle_unified_sse(
             },
         )
 
-    # Parse threshold parameter
+    # threshold 파라미터 파싱
     threshold_values = []
     threshold_parts = [t.strip() for t in threshold.split(",") if t.strip()]
 
     if len(threshold_parts) == 1:
-        # Single value - broadcast to all 10 loadcells
+        # 단일 값 — 10개 loadcell 전체에 broadcast
         try:
             single_threshold = float(threshold_parts[0])
             threshold_values = [single_threshold] * 10
@@ -518,7 +531,7 @@ async def handle_unified_sse(
                 },
             )
     elif len(threshold_parts) == 10:
-        # Per-loadcell thresholds
+        # loadcell별 개별 threshold
         try:
             threshold_values = [float(t) for t in threshold_parts]
         except ValueError as e:
@@ -553,19 +566,17 @@ async def handle_unified_sse(
     )
 
     async def unified_event_generator():
-        """Generate multiplexed SSE events from enabled streams."""
-        nonlocal request
+        """활성화된 stream들에서 multiplexing된 SSE 이벤트를 생성한다."""
         stop_flag = request.app.state.stop_event
         event_queue = asyncio.Queue()
         tasks = []
 
-        # Create change detector if loadcells stream enabled
+        # loadcells stream이 활성화되면 change detector 생성 후
+        # polling 서비스를 구독한다
         loadcells_queue = None
         detector = None
         if "loadcells" in enabled_streams:
-            loadcells_queue = (
-                StreamQueue()
-            )  # TODO: Pass actual loadcell queue from commands module
+            loadcells_queue = StreamQueue()
             await request.app.state.polling_services["loadcells"].subscribe(
                 loadcells_queue
             )
@@ -585,11 +596,10 @@ async def handle_unified_sse(
             )
             tasks.append(asyncio.create_task(poll_loadcells()))
 
+        # doors stream이 활성화되면 IO status polling을 구독한다
         io_status_queue = None
         if "doors" in enabled_streams:
-            io_status_queue = (
-                StreamQueue()
-            )  # TODO: Pass actual I/O status queue from commands module
+            io_status_queue = StreamQueue()
             await request.app.state.polling_services["io_status"].subscribe(
                 io_status_queue
             )
@@ -601,20 +611,20 @@ async def handle_unified_sse(
             tasks.append(asyncio.create_task(poll_doors()))
 
         try:
-            # Consume events from queue and yield SSE formatted data
+            # queue의 이벤트를 소비해 SSE 형식으로 yield한다
             while not stop_flag.is_set():
                 if await request.is_disconnected():
                     logger.info("Client disconnected from unified SSE stream")
                     break
 
-                # Wait for next event with timeout to check disconnect status
+                # 연결 해제를 주기적으로 확인하기 위해 timeout을 두고 대기
                 try:
                     event_name, event_data = await asyncio.wait_for(
                         event_queue.get(), timeout=0.5
                     )
                     yield f"event: {event_name}\ndata: {json.dumps(event_data)}\n\n"
                 except asyncio.TimeoutError:
-                    # No event available, continue to check disconnect
+                    # 이벤트 없음 — 연결 상태 확인을 위해 계속
                     continue
                 except asyncio.CancelledError:
                     logger.info("Unified SSE generator cancelled")
@@ -632,11 +642,11 @@ async def handle_unified_sse(
                 )
                 io_status_queue.shutdown()
 
-            # Cancel all polling tasks
+            # 모든 polling task 취소
             for task in tasks:
                 task.cancel()
 
-            # Wait for tasks to complete cancellation
+            # 취소 완료 대기
             await asyncio.gather(*tasks, return_exceptions=True)
 
             logger.info(f"Unified SSE stream ended: streams={enabled_streams}")
@@ -650,20 +660,15 @@ async def handle_unified_sse(
         },
     )
 
-def unix_to_iso8601(timestamp: float) -> str:
-    """Convert a UNIX timestamp to ISO 8601 format."""
-    from datetime import datetime, timezone
-    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    return dt.isoformat().replace("+00:00", "Z")
-
 def make_poll_loadcells(
     request: Request,
     loadcells_queue: StreamQueue,
     event_queue: asyncio.Queue,
     detector: LoadcellChangeDetector,
 ):
+    """loadcell polling 소비 task를 만드는 factory."""
     async def poll_loadcells():
-        """Poll loadcell data and generate events."""
+        """loadcell 데이터를 소비해 SSE 이벤트를 생성한다."""
         while not request.app.state.stop_event.is_set():
             if await request.is_disconnected():
                 break
@@ -673,7 +678,7 @@ def make_poll_loadcells(
                 raw_values: list[str] = raw_values  # type: ignore
                 timestamp = unix_to_iso8601(timestamp)
 
-                # Process values through detector
+                # detector로 filtering + 변화 감지 수행
                 (
                     filtered_strings,
                     filtered_numerics,
@@ -681,12 +686,12 @@ def make_poll_loadcells(
                     change_details,
                 ) = detector.process(raw_values)
 
-                # Check for uncertainties
+                # 불확실성(에러 상태) 검사
                 uncertain_indices = detector.detect_uncertainties(
                     raw_values, filtered_numerics
                 )
 
-                # Always send update event
+                # update 이벤트는 항상 전송
                 update_event = LoadcellUpdateEvent(
                     timestamp=timestamp,
                     raw_values=raw_values,
@@ -695,7 +700,7 @@ def make_poll_loadcells(
                 )
                 await event_queue.put(("loadcell.update", update_event.model_dump()))
 
-                # Send change event if threshold exceeded
+                # threshold 초과 시 change 이벤트 전송
                 if changed_indices:
                     change_event = LoadcellChangeEvent(
                         timestamp=timestamp,
@@ -714,7 +719,7 @@ def make_poll_loadcells(
                         ("loadcell.change", change_event.model_dump())
                     )
 
-                # Send uncertainty event if errors detected
+                # 에러 감지 시 uncertainty 이벤트 전송
                 if uncertain_indices:
                     error_values = [raw_values[i] for i in uncertain_indices]
                     uncertainty_event = LoadcellUncertaintyEvent(
@@ -730,11 +735,13 @@ def make_poll_loadcells(
                 logger.info("Loadcell polling cancelled")
                 raise
             except IOBoardError as e:
-                # I/O board failure - reset filter state and send uncertainty for all loadcells
+                # IO board 장애 — filter 상태를 reset하고 전체 loadcell에
+                # 대한 uncertainty 이벤트를 전송한다
                 if detector:
                     detector.reset()
 
-                timestamp = datetime.utcnow().isoformat()
+                # 정상 경로와 동일한 포맷(UTC, Z suffix)으로 통일
+                timestamp = unix_to_iso8601(time())
                 uncertainty_event = LoadcellUncertaintyEvent(
                     timestamp=timestamp,
                     affected_indices=list(range(10)),
@@ -745,12 +752,12 @@ def make_poll_loadcells(
                     ("loadcell.uncertainty", uncertainty_event.model_dump())
                 )
 
-                # Also send error event
+                # error 이벤트도 함께 전송
                 await event_queue.put(("error", {"stream": "loadcells", **e.to_dict()}))
                 logger.warning(f"Loadcell stream error: {e}")
 
             except Exception as e:
-                # Unexpected error
+                # 예기치 못한 에러
                 logger.error(f"Unexpected error in loadcell stream: {e}", exc_info=e)
                 await event_queue.put(
                     (
@@ -772,8 +779,9 @@ def make_poll_doors(
     io_status_queue: StreamQueue,
     event_queue: asyncio.Queue,
 ):
+    """door status polling 소비 task를 만드는 factory."""
     async def poll_doors():
-        """Poll door status and generate events."""
+        """door status를 소비해 SSE 이벤트를 생성한다."""
         while not request.app.state.stop_event.is_set():
             if await request.is_disconnected():
                 break
@@ -792,7 +800,7 @@ def make_poll_doors(
                 logger.info("Door polling cancelled")
                 raise
             except IOBoardError as e:
-                # Send error event but don't terminate
+                # error 이벤트를 전송하되 stream은 유지한다
                 await event_queue.put(("error", {"stream": "doors", **e.to_dict()}))
                 logger.warning(f"Door stream error: {e}")
             except Exception as e:

@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Request
+"""recording router — loadcell 기록 시작/정지/조회.
+
+주의: 이 router의 route들은 description= 을 지정하지 않아 함수 docstring이
+OpenAPI description으로 노출된다. 따라서 docstring은 영어로 유지한다.
+"""
 
 import logging
 
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from core.time_utils import unix_to_iso8601
 from services import recording
 
 
@@ -40,12 +46,6 @@ class RecordingItem(BaseModel):
         "2024-01-01T12:00:00Z",
         "2024-06-15T08:30:45Z"
     ])
-
-def unix_to_iso8601(timestamp: float) -> str:
-    """Convert a UNIX timestamp to ISO 8601 format."""
-    from datetime import datetime, timezone
-    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    return dt.isoformat().replace("+00:00", "Z")
 
 class RecordingDataResponse(BaseModel):
     logs: list[RecordingItem]
