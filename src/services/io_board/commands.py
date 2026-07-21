@@ -1,9 +1,10 @@
-"""
-High-level command interface for IO Board operations.
+"""IO Board 고수준 command 인터페이스.
 
-This module provides a business logic layer that separates high-level device
-commands from low-level protocol details. All functions include comprehensive
-type hints, docstrings, and error handling.
+저수준 protocol 세부사항과 분리된 비즈니스 로직 layer.
+initialize/calibrate/deadbolt 제어 같은 management command와
+loadcell·IO status 조회 같은 request command를 제공하며,
+loadcell 조회에는 전역 request throttle(부호 손상 방지)과
+sanitizer(sign-glitch 보정)가 적용된다.
 """
 
 import asyncio
@@ -35,26 +36,25 @@ async def _send_command(
     subcommand: RequestSubcommand | ManagementSubcommand,
     data: Dict[str, Any]
 ) -> Any:
-    """
-    Send a command to the IO Board and return parsed response.
-    
-    This internal helper combines protocol building, serial communication,
-    and response parsing with error handling and logging.
-    
+    """IO Board에 command를 전송하고 파싱된 응답을 반환한다.
+
+    protocol 빌드, serial 송수신, 응답 파싱을 묶은 내부 helper.
+    응답의 CMD/SUBCMD가 요청과 다르면 일치할 때까지 재시도한다.
+
     Args:
-        command: Command type (MC or RQ)
-        subcommand: Specific subcommand code
-        data: Command-specific data payload
-        
+        command: command 종류 (MC 또는 RQ)
+        subcommand: 세부 subcommand 코드
+        data: command별 데이터 payload
+
     Returns:
-        Parsed response structure
-        
+        파싱된 응답 구조체
+
     Raises:
-        ValidationError: If command/subcommand types mismatch
-        ProtocolError: If protocol building/parsing fails
-        SerialCommunicationError: If serial communication fails
+        ValidationError: command/subcommand 타입이 불일치할 때
+        ProtocolError: protocol 빌드/파싱 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
-    
+
     if command == CommandType.MANAGEMENT_CONTROL and not isinstance(subcommand, ManagementSubcommand):
         raise ValidationError("Mismatched subcommand type for MANAGEMENT_CONTROL command")
     if command == CommandType.REQUEST and not isinstance(subcommand, RequestSubcommand):
@@ -65,46 +65,47 @@ async def _send_command(
         request_message = build_request(command.value, subcommand.value, data)
 
         while True:
-            # Send and receive via serial
+            # serial로 송수신
             response_message = await fetch(request_message)
-            
-            # Parse response
+
+            # 응답 파싱
             response = parse_response(response_message)
 
-            # Validate response command and subcommand
+            # 응답의 command/subcommand 검증
             if response.COMMAND != command.value or response.SUBCOMMAND != subcommand.value:
                 logger.warning(
                     f"Unexpected response CMD/SUBCMD: "
                     f"expected {command.value}/{subcommand.value}, "
                     f"got {response.COMMAND}/{response.SUBCOMMAND}. Retrying..."
                 )
-                continue  # Retry on unexpected response
-            
+                continue  # 예상과 다른 응답이면 재시도
+
             return response
+
 
 @asynccontextmanager
 async def _session(command: str, **kwargs) -> AsyncIterator[None]:
+    """DeviceError를 command 컨텍스트가 포함된 에러로 감싸는 helper."""
     try:
         yield
     except DeviceError as e:
         raise DeviceError(
-            f"Command '{command}' failed"            ,
+            f"Command '{command}' failed",
             ErrorCode.DEVICE_COMMAND_FAILED,
             {'command': command} | kwargs
         ) from e
 
 
 async def initialize() -> None:
-    """
-    Initialize the IO Board device.
-    
-    This command should be called once after device power-on or reset
-    to initialize all subsystems.
-    
+    """IO Board 디바이스를 초기화한다.
+
+    디바이스 전원 인가 또는 reset 후 1회 호출해 모든 서브시스템을
+    초기화한다.
+
     Raises:
-        DeviceError: If initialization fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: 초기화 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('initialize'):
         logger.info("Initializing IO Board")
@@ -117,19 +118,18 @@ async def initialize() -> None:
 
 
 async def set_deadbolt(action: DeadboltAction) -> DeadboltState:
-    """
-    Control the door lock/deadbolt.
-    
+    """deadbolt(도어락)를 제어한다.
+
     Args:
-        state: Desired door state (OPEN or CLOSE)
-        
+        action: 원하는 deadbolt 동작 (OPEN 또는 CLOSE)
+
     Returns:
-        Actual door state after command execution
-        
+        command 실행 후 디바이스가 보고한 실제 deadbolt 상태
+
     Raises:
-        DeviceError: If door control fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: deadbolt 제어 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('set_deadbolt', action=action.value):
         logger.info(f"Setting deadbolt: {action.value}")
@@ -144,16 +144,15 @@ async def set_deadbolt(action: DeadboltAction) -> DeadboltState:
 
 
 async def calibrate() -> None:
-    """
-    Calibrate the IO Board sensors (loadcells).
-    
-    This command initiates a calibration sequence for all weight sensors.
-    The device should be in an unloaded state before calibration.
-    
+    """IO Board 센서(loadcell)를 calibrate한다.
+
+    모든 무게 센서에 대한 calibration 시퀀스를 시작한다.
+    calibration 전에 디바이스는 무부하 상태여야 한다.
+
     Raises:
-        DeviceError: If calibration fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: calibration 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('calibrate'):
         logger.info("Calibrating loadcells")
@@ -166,20 +165,19 @@ async def calibrate() -> None:
 
 
 async def set_manufacturing_number(manufacturing_number: str) -> str:
-    """
-    Set the device manufacturing/product ID.
-    
+    """디바이스 제조번호(product ID)를 설정한다.
+
     Args:
-        manufacturing_number: 11-character alphanumeric product ID
-        
+        manufacturing_number: 11자리 영숫자 product ID
+
     Returns:
-        Manufacturing number as confirmed by device (echoed back)
-        
+        디바이스가 확인(echo back)한 제조번호
+
     Raises:
-        DeviceError: If setting manufacturing number fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
-        ValidationError: If manufacturing number format is invalid
+        DeviceError: 제조번호 설정 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
+        ValidationError: 제조번호 형식이 잘못된 경우
     """
     async with _session('set_manufacturing_number', manufacturing_number=manufacturing_number):
         logger.info(f"Setting manufacturing number: {manufacturing_number}")
@@ -194,15 +192,14 @@ async def set_manufacturing_number(manufacturing_number: str) -> str:
 
 
 async def clear_errors() -> None:
-    """
-    Clear the device error log.
-    
-    This command clears all stored error codes from the device's error history.
-    
+    """디바이스 에러 로그를 비운다.
+
+    디바이스 에러 히스토리에 저장된 모든 에러 코드를 삭제한다.
+
     Raises:
-        DeviceError: If clearing errors fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: 에러 삭제 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('clear_errors'):
         logger.info("Clearing error logs")
@@ -215,16 +212,15 @@ async def clear_errors() -> None:
 
 
 async def reboot() -> None:
-    """
-    Reboot the IO Board device.
-    
-    This command initiates a device restart. The device will be unavailable
-    for a few seconds during the reboot process.
-    
+    """IO Board 디바이스를 재부팅한다.
+
+    디바이스 재시작을 시작하며, 재부팅 동안 몇 초간 디바이스를 사용할 수
+    없다.
+
     Raises:
-        DeviceError: If reboot command fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: reboot command 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('reboot'):
         logger.info("Sending reboot command")
@@ -237,16 +233,15 @@ async def reboot() -> None:
 
 
 async def get_product_info() -> ProductInfoData:
-    """
-    Get device manufacturing information.
-    
+    """디바이스 제조 정보를 조회한다.
+
     Returns:
-        Dictionary with 'product_id' (11 chars) and 'sw_version' (2 chars)
-        
+        'product_id'(11자)와 'sw_version'(2자)을 담은 딕셔너리
+
     Raises:
-        DeviceError: If getting product info fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: 제조 정보 조회 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('get_product_info'):
         logger.info("Getting product info")
@@ -263,12 +258,12 @@ async def get_product_info() -> ProductInfoData:
         return result
 
 
-# Loadcell request throttle. The firmware reports garbage signs when RQIW
-# requests are spaced closer than ~0.7s (measured sign duty on a negative
-# true value: 0.09s->0.89, 0.5s->0.25, 0.6s->0.03, 0.7s->0.00 — see
-# docs/FIRMWARE_SIGN_GLITCH_REQUEST.md). All consumers (HTTP, polling
-# service, health checks) share one gate: requests arriving before the
-# minimum gap are served from the cached frame.
+# loadcell request throttle. RQIW 요청 간격이 ~0.7s보다 촘촘하면 펌웨어가
+# 부호가 손상된 값을 보고한다 (음수 참값 기준 실측 sign duty:
+# 0.09s->0.89, 0.5s->0.25, 0.6s->0.03, 0.7s->0.00 —
+# docs/FIRMWARE_SIGN_GLITCH_REQUEST.md 참고). 모든 소비자(HTTP, polling
+# service, health check)가 하나의 gate를 공유하며, 최소 gap 이전에
+# 도착한 요청은 캐시된 frame으로 응답한다.
 _loadcell_min_gap: float = 0.0
 _loadcell_cache: Optional[List[str]] = None
 _loadcell_cache_ts: float = 0.0
@@ -276,7 +271,7 @@ _loadcell_gate = asyncio.Lock()
 
 
 def configure_loadcell_throttle(min_gap: float) -> None:
-    """Configure the loadcell request throttle. Call once during startup."""
+    """loadcell request throttle을 설정한다. startup 시 1회 호출."""
     global _loadcell_min_gap, _loadcell_cache, _loadcell_cache_ts
     _loadcell_min_gap = min_gap
     _loadcell_cache = None
@@ -287,21 +282,20 @@ def configure_loadcell_throttle(min_gap: float) -> None:
 
 
 async def get_loadcells() -> List[str]:
-    """
-    Get current loadcell weight readings.
+    """현재 loadcell 무게 판독값을 조회한다.
 
-    Serial requests are globally throttled to one per configured minimum
-    gap; faster calls return the cached (sanitized) frame.
+    serial 요청은 설정된 최소 gap당 1회로 전역 throttle되며,
+    그보다 빠른 호출은 캐시된 (sanitize된) frame을 반환한다.
 
     Returns:
-        List of 10 loadcell readings (6 characters each).
-        Format: "+XXXXX" or "-XXXXX" for valid readings,
-                "EEEEEE" for error, "VVVVVV" for invalid
+        loadcell 판독값 10개 리스트 (각 6자).
+        형식: 정상 판독값은 "+XXXXX" 또는 "-XXXXX",
+              에러는 "EEEEEE", 무효값은 "VVVVVV"
 
     Raises:
-        DeviceError: If getting loadcell data fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: loadcell 데이터 조회 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     global _loadcell_cache, _loadcell_cache_ts
     async with _loadcell_gate:
@@ -328,16 +322,15 @@ async def get_loadcells() -> List[str]:
 
 
 async def get_status() -> IOStatusData:
-    """
-    Get door and deadbolt sensor status.
-    
+    """door 및 deadbolt 센서 상태를 조회한다.
+
     Returns:
-        StatusData with 'door' and 'deadbolt' status values.
-        
+        'door'와 'deadbolt' 상태값을 담은 IOStatusData
+
     Raises:
-        DeviceError: If getting IO status fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: IO status 조회 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('get_status'):
         logger.debug("Getting status")
@@ -355,17 +348,16 @@ async def get_status() -> IOStatusData:
 
 
 async def get_errors() -> List[str]:
-    """
-    Get device error history.
-    
+    """디바이스 에러 히스토리를 조회한다.
+
     Returns:
-        List of up to 4 error codes (4 characters each).
-        "0000" indicates no error in that slot.
-        
+        최대 4개의 에러 코드 리스트 (각 4자).
+        "0000"은 해당 슬롯에 에러가 없음을 의미한다.
+
     Raises:
-        DeviceError: If getting error list fails
-        ProtocolError: If protocol communication fails
-        SerialCommunicationError: If serial communication fails
+        DeviceError: 에러 리스트 조회 실패 시
+        ProtocolError: protocol 통신 실패 시
+        SerialCommunicationError: serial 통신 실패 시
     """
     async with _session('get_errors'):
         logger.debug("Getting errors")

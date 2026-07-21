@@ -1,9 +1,9 @@
-"""
-Serial communication layer for IO Board.
+"""IO Board serial 통신 layer.
 
-This module provides async serial communication with the IO Board device,
-including retry logic with exponential backoff, structured logging, and
-comprehensive error handling.
+IO Board 디바이스와의 비동기 serial 통신을 제공한다.
+exponential backoff retry, 구조화된 로깅, 에러 분류를 포함하며,
+mutex로 serial 포트 접근을 직렬화한다. 연결은 요청마다 열지 않고
+재사용한다 (연결 유지 방식).
 """
 
 import asyncio
@@ -19,17 +19,16 @@ from exceptions import ErrorCode, SerialCommunicationError
 
 logger = get_logger(__name__)
 
-# Global serial configuration and mutex
+# 전역 serial 설정과 mutex (포트 접근 직렬화)
 _serial_config: Optional[SerialModel] = None
 _serial_mutex = asyncio.Lock()
 
 
 def configure_serial(config: SerialModel) -> None:
-    """
-    Configure serial communication parameters.
-    
+    """serial 통신 파라미터를 설정한다. startup 시 1회 호출.
+
     Args:
-        config: Serial configuration object
+        config: serial 설정 객체
     """
     global _serial_config
     _serial_config = config
@@ -41,14 +40,13 @@ def configure_serial(config: SerialModel) -> None:
 
 
 def get_serial_config() -> SerialModel:
-    """
-    Get current serial configuration.
-    
+    """현재 serial 설정을 반환한다.
+
     Returns:
-        Serial configuration object
-        
+        serial 설정 객체
+
     Raises:
-        SerialCommunicationError: If serial not configured
+        SerialCommunicationError: serial이 아직 설정되지 않은 경우
     """
     if _serial_config is None:
         raise SerialCommunicationError(
@@ -58,25 +56,26 @@ def get_serial_config() -> SerialModel:
         )
     return _serial_config
 
+# 재사용되는 전역 serial 연결 (요청마다 열지 않음)
 reader: Optional[asyncio.StreamReader] = None
 writer: Optional[asyncio.StreamWriter] = None
 
 async def get_serial_connection():
-    """
-    Get an asynchronous serial connection using the current configuration.
-    
+    """현재 설정으로 비동기 serial 연결을 가져온다 (기존 연결 재사용).
+
     Returns:
-        A tuple of (StreamReader, StreamWriter) for the serial connection.
-        
+        serial 연결의 (StreamReader, StreamWriter) 튜플
+
     Raises:
-        SerialCommunicationError: If serial not configured or connection fails
+        SerialCommunicationError: serial 미설정 또는 연결 실패 시
     """
     global reader, writer
 
+    # 살아있는 기존 연결이 있으면 그대로 재사용
     if reader is not None and writer is not None and not writer.is_closing():
         return reader, writer
-    
-    # Wait for any existing connection to close
+
+    # 닫히는 중인 기존 연결이 있으면 완전히 닫힐 때까지 대기
     if writer is not None:
         logger.debug("Waiting for existing serial connection to close")
         writer.close()
@@ -84,7 +83,7 @@ async def get_serial_connection():
         reader = None
         writer = None
 
-    # Establish new serial connection
+    # 새 serial 연결 수립
     config = get_serial_config()
     logger.info(f"Opening serial port: {config.port} @ {config.baudrate} baud")
     try:
@@ -93,7 +92,7 @@ async def get_serial_connection():
             baudrate=config.baudrate,
         )
 
-        # Set low latency mode on POSIX systems if supported
+        # POSIX 시스템에서 지원되면 low latency 모드 활성화
         if os.name == 'posix':
             try:
                 serial_instance: serial.Serial = writer.transport.get_extra_info('serial')
@@ -104,8 +103,8 @@ async def get_serial_connection():
         return reader, writer
     except serial.SerialException as e:
         error_msg = str(e).lower()
-        
-        # Categorize serial errors
+
+        # serial 에러를 원인별 에러 코드로 분류
         if "access is denied" in error_msg or "permission" in error_msg:
             raise SerialCommunicationError(
                 f"Permission denied accessing serial port",
@@ -137,86 +136,84 @@ async def _fetch_with_timeout(
     writer: asyncio.StreamWriter,
     message: bytes
 ) -> bytes:
-    """
-    Send message and receive response with appropriate timeouts.
-    
-    This internal function handles the low-level serial I/O with timeouts
-    for each phase of the protocol frame.
-    
+    """메시지를 전송하고 단계별 timeout을 적용해 응답을 수신한다.
+
+    protocol frame의 각 단계(STX/본문/checksum)에 개별 timeout을
+    적용하는 저수준 serial I/O 내부 함수.
+
     Args:
-        reader: Async stream reader for serial port
-        writer: Async stream writer for serial port
-        message: Binary message to send
-        
+        reader: serial 포트의 비동기 stream reader
+        writer: serial 포트의 비동기 stream writer
+        message: 전송할 바이너리 메시지
+
     Returns:
-        Complete binary response message
-        
+        완전한 바이너리 응답 메시지
+
     Raises:
-        asyncio.TimeoutError: If any read operation times out
-        asyncio.IncompleteReadError: If connection closes before response complete
+        asyncio.TimeoutError: 읽기 단계 중 하나라도 timeout된 경우
+        asyncio.IncompleteReadError: 응답 완료 전에 연결이 닫힌 경우
     """
     config = get_serial_config()
-    
-    # Send request message
+
+    # request 메시지 전송
     log_payload(logger, "TX", message, "request")
     writer.write(message)
     await writer.drain()
-    
-    # Read response frame in three phases with appropriate timeouts
+
+    # 응답 frame을 세 단계로 나눠 각각의 timeout으로 읽는다
     response = b""
-    
-    # Phase 1: Read STX (Start of Text) byte
+
+    # 1단계: STX (Start of Text) 바이트 읽기
     response += await asyncio.wait_for(
         reader.readexactly(1),
         timeout=config.header_timeout
     )
-    
-    # Phase 2: Read until ETX (End of Text) byte
+
+    # 2단계: ETX (End of Text) 바이트까지 읽기
     response += await asyncio.wait_for(
         reader.readuntil(b"\x03"),
         timeout=config.body_timeout
     )
-    
-    # Phase 3: Read checksum byte
+
+    # 3단계: checksum 바이트 읽기
     response += await asyncio.wait_for(
         reader.readexactly(1),
         timeout=config.checksum_timeout
     )
-    
+
     log_payload(logger, "RX", response, "response")
     return response
 
 
 async def fetch(message: bytes) -> bytes:
-    """
-    Send message to IO Board and receive response with retry logic.
-    
-    This function implements thread-safe serial communication with:
-    - Mutex-based exclusive access
-    - Exponential backoff retry strategy
-    - Comprehensive error handling and logging
-    - Automatic connection management
-    
+    """IO Board에 메시지를 전송하고 retry 로직과 함께 응답을 수신한다.
+
+    다음을 포함한 안전한 serial 통신을 구현한다:
+    - mutex 기반 배타적 포트 접근
+    - exponential backoff retry 전략
+    - 에러 분류 및 구조화된 로깅
+    - 자동 연결 관리 (연결 재사용, 에러 시 reset)
+
     Args:
-        message: Binary protocol message to send
-        
+        message: 전송할 바이너리 protocol 메시지
+
     Returns:
-        Binary protocol response from device
-        
+        디바이스의 바이너리 protocol 응답
+
     Raises:
-        SerialCommunicationError: If communication fails after all retries
+        SerialCommunicationError: 모든 retry 후에도 통신이 실패한 경우
     """
     config = get_serial_config()
-    
+
     async with _serial_mutex:
         with PerformanceLogger(logger, "serial_fetch", port=config.port):
             reader, writer = await get_serial_connection()
-            
+
             try:
-                # Retry loop with exponential backoff
+                # exponential backoff retry 루프
                 retry_delay = config.initial_retry_delay
                 last_exception: Optional[Exception] = None
-                
+
                 for attempt in range(1, config.max_retries + 1):
                     try:
                         logger.debug(f"Attempt {attempt}/{config.max_retries}")
@@ -247,7 +244,7 @@ async def fetch(message: bytes) -> bytes:
                             await asyncio.sleep(retry_delay)
                             retry_delay *= config.retry_backoff_multiplier
                 
-                # All retries exhausted
+                # 모든 retry 소진
                 if isinstance(last_exception, asyncio.TimeoutError):
                     raise SerialCommunicationError(
                         f"Serial read timeout after {config.max_retries} attempts",
@@ -270,14 +267,9 @@ async def fetch(message: bytes) -> bytes:
                     ) from last_exception
             
             except Exception as e:
-                # Reset connection on any unexpected error
+                # 예기치 못한 에러 시 연결을 reset한다. 정상 경로에서는
+                # 연결을 닫지 않고 다음 요청에서 재사용한다.
                 logger.error(f"Serial communication error: {e} (resetting connection)")
                 writer.close()
                 await writer.wait_closed()
                 raise
-                    
-            finally:
-                # Always close the connection
-                logger.debug("Closing serial port")
-                # writer.close()
-                # await writer.wait_closed()

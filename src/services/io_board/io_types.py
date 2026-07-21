@@ -1,8 +1,10 @@
-"""
-Type definitions and data models for IO Board protocol.
+"""IO Board protocol 타입 정의 및 데이터 모델.
 
-This module defines type-safe structures for protocol messages, commands,
-and data payloads using TypedDicts, enums, and Pydantic models.
+TypedDict, Enum, Pydantic 모델을 사용해 protocol 메시지, command,
+데이터 payload의 타입 안전한 구조를 정의한다.
+
+주의: Pydantic 모델(BaseModel)의 docstring은 OpenAPI 스키마
+description으로 노출되므로 영어로 유지한다.
 """
 
 from enum import Enum
@@ -12,15 +14,15 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class CommandType(str, Enum):
-    """Protocol command types."""
-    
+    """protocol command 종류."""
+
     MANAGEMENT_CONTROL = "MC"
     REQUEST = "RQ"
 
 
 class ManagementSubcommand(str, Enum):
-    """Management control subcommands."""
-    
+    """management control subcommand 코드."""
+
     INITIALIZE = "PD"
     DEADBOLT_CONTROL = "DC"
     CALIBRATE = "LZ"
@@ -30,14 +32,15 @@ class ManagementSubcommand(str, Enum):
 
 
 class RequestSubcommand(str, Enum):
-    """Request subcommands."""
-    
+    """request subcommand 코드."""
+
     MANUFACTURING_INFO = "MI"
     LOADCELL_WEIGHTS = "IW"
     IO_STATUS = "ID"
     ERROR_LIST = "ER"
 
 
+# door 상태 값 (docstring은 OpenAPI 스키마 description으로 노출되므로 영어 유지)
 class DoorState(str, Enum):
     """Door state values."""
 
@@ -45,6 +48,7 @@ class DoorState(str, Enum):
     CLOSED = "CLOSED"
 
 
+# deadbolt 상태 값
 class DeadboltState(str, Enum):
     """Deadbolt state values."""
 
@@ -52,30 +56,31 @@ class DeadboltState(str, Enum):
     LOCKED = "LOCKED"
 
 
+# deadbolt 제어 동작 값
 class DeadboltAction(str, Enum):
     """Deadbolt action values."""
-    
+
     OPEN = "OPEN"
     CLOSE = "CLOSE"
 
 
-# Protocol message structures (for internal use)
+# protocol 메시지 구조 (내부 사용)
 
 
 class ProductInfoData(TypedDict):
-    """Product information response data."""
-    
+    """제조 정보 응답 데이터."""
+
     product_id: str
     sw_version: str
 
 class IOStatusData(TypedDict):
-    """IO Status response data."""
-    
+    """IO status 응답 데이터."""
+
     door: DoorState
     deadbolt: DeadboltState
 
 
-# API request/response models (Pydantic)
+# API request/response 모델 (Pydantic) — docstring은 OpenAPI에 노출됨
 
 class ManufacturingNumberRequest(BaseModel):
     """Request model for setting manufacturing number."""

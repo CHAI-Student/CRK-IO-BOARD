@@ -1,8 +1,7 @@
-"""
-Custom exception hierarchy for IO Board module.
+"""IO Board 서비스 커스텀 예외 계층.
 
-This module defines a comprehensive exception hierarchy for granular error handling
-and provides error codes for client-side consumption.
+세분화된 에러 처리를 위한 예외 계층과 클라이언트가 소비할 수 있는
+표준 에러 코드(E1xxx~E9xxx)를 정의한다.
 """
 
 from enum import Enum
@@ -10,13 +9,13 @@ from typing import Optional
 
 
 class ErrorCode(str, Enum):
-    """Standard error codes for API responses."""
-    
-    # Configuration errors (1xxx)
+    """API 응답용 표준 에러 코드."""
+
+    # 설정 에러 (1xxx)
     CONFIG_INVALID = "E1001"
     CONFIG_MISSING = "E1002"
     
-    # Serial communication errors (2xxx)
+    # serial 통신 에러 (2xxx)
     SERIAL_PORT_NOT_FOUND = "E2001"
     SERIAL_PORT_BUSY = "E2002"
     SERIAL_PORT_PERMISSION_DENIED = "E2003"
@@ -26,7 +25,7 @@ class ErrorCode(str, Enum):
     SERIAL_WRITE_ERROR = "E2007"
     SERIAL_INCOMPLETE_READ = "E2008"
     
-    # Protocol errors (3xxx)
+    # protocol 에러 (3xxx)
     PROTOCOL_BUILD_FAILED = "E3001"
     PROTOCOL_PARSE_FAILED = "E3002"
     PROTOCOL_CHECKSUM_MISMATCH = "E3003"
@@ -34,52 +33,45 @@ class ErrorCode(str, Enum):
     PROTOCOL_INVALID_RESPONSE = "E3005"
     PROTOCOL_MALFORMED_DATA = "E3006"
     
-    # Validation errors (4xxx)
+    # 입력 검증 에러 (4xxx)
     VALIDATION_INVALID_INPUT = "E4001"
     VALIDATION_OUT_OF_RANGE = "E4002"
     VALIDATION_INVALID_FORMAT = "E4003"
     VALIDATION_MISSING_REQUIRED = "E4004"
     
-    # Device errors (5xxx)
+    # 디바이스 에러 (5xxx)
     DEVICE_NOT_INITIALIZED = "E5001"
     DEVICE_BUSY = "E5002"
     DEVICE_ERROR_STATE = "E5003"
     DEVICE_COMMAND_FAILED = "E5004"
     
-    # Internal errors (9xxx)
+    # 내부 에러 (9xxx)
     INTERNAL_ERROR = "E9001"
     UNKNOWN_ERROR = "E9999"
 
 
 class IOBoardError(Exception):
-    """Base exception for all IO Board errors."""
-    
+    """모든 IO Board 에러의 base 예외.
+
+    Args:
+        message: 사람이 읽을 수 있는 에러 메시지
+        error_code: 클라이언트 식별용 표준 에러 코드
+        details: 추가 에러 컨텍스트 (민감 정보 포함 금지)
+    """
+
     def __init__(
         self,
         message: str,
         error_code: ErrorCode = ErrorCode.UNKNOWN_ERROR,
         details: Optional[dict] = None
     ) -> None:
-        """
-        Initialize IO Board error.
-        
-        Args:
-            message: Human-readable error message
-            error_code: Standard error code for client identification
-            details: Additional error context (should not contain sensitive data)
-        """
         super().__init__(message)
         self.message = message
         self.error_code = error_code
         self.details = details or {}
-    
+
     def to_dict(self) -> dict:
-        """
-        Convert exception to dictionary for API responses.
-        
-        Returns:
-            Dictionary with error code, message, and details
-        """
+        """API 응답용 딕셔너리(error_code/message/details)로 변환한다."""
         return {
             "error_code": self.error_code.value,
             "message": self.message,
@@ -88,65 +80,60 @@ class IOBoardError(Exception):
 
 
 class ConfigurationError(IOBoardError):
-    """Configuration-related errors."""
-    
+    """설정 관련 에러."""
+
     def __init__(
         self,
         message: str,
         error_code: ErrorCode = ErrorCode.CONFIG_INVALID,
         details: Optional[dict] = None
     ) -> None:
-        """Initialize configuration error."""
         super().__init__(message, error_code, details)
 
 
 class SerialCommunicationError(IOBoardError):
-    """Serial communication errors."""
-    
+    """serial 통신 에러."""
+
     def __init__(
         self,
         message: str,
         error_code: ErrorCode = ErrorCode.SERIAL_CONNECTION_FAILED,
         details: Optional[dict] = None
     ) -> None:
-        """Initialize serial communication error."""
         super().__init__(message, error_code, details)
 
 
 class ProtocolError(IOBoardError):
-    """Protocol encoding/decoding errors."""
-    
+    """protocol 인코딩/디코딩 에러."""
+
     def __init__(
         self,
         message: str,
         error_code: ErrorCode = ErrorCode.PROTOCOL_PARSE_FAILED,
         details: Optional[dict] = None
     ) -> None:
-        """Initialize protocol error."""
         super().__init__(message, error_code, details)
 
 
 class ValidationError(IOBoardError):
-    """Input validation errors."""
-    
+    """입력 검증 에러."""
+
     def __init__(
         self,
         message: str,
         error_code: ErrorCode = ErrorCode.VALIDATION_INVALID_INPUT,
         details: Optional[dict] = None
     ) -> None:
-        """Initialize validation error."""
         super().__init__(message, error_code, details)
 
 
 class DeviceError(IOBoardError):
-    """Device operation errors."""
-    
+    """디바이스 동작 에러."""
+
     def __init__(
         self,
         message: str,
         error_code: ErrorCode = ErrorCode.DEVICE_COMMAND_FAILED,
         details: Optional[dict] = None
     ) -> None:
-        """Initialize device error."""
         super().__init__(message, error_code, details)

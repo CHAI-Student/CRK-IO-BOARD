@@ -1,8 +1,8 @@
-"""
-Structured logging configuration for IO Board module.
+"""IO Board 서비스 구조화 로깅 설정.
 
-This module provides centralized logging configuration with correlation IDs,
-structured output, and performance metrics.
+correlation ID 추적, 구조화된 출력 포맷, 성능 측정
+(PerformanceLogger), serial payload hex 덤프(log_payload)를 포함한
+중앙집중식 로깅 설정을 제공한다.
 """
 
 import contextvars
@@ -12,43 +12,27 @@ from typing import Any, Optional
 import uuid
 
 
-# Context variable for correlation ID tracking
+# correlation ID 추적용 context variable
 correlation_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "correlation_id", default=None
 )
 
 
 class CorrelationIdFilter(logging.Filter):
-    """Logging filter that adds correlation ID to log records."""
-    
+    """로그 레코드에 correlation ID를 추가하는 logging filter."""
+
     def filter(self, record: logging.LogRecord) -> bool:
-        """
-        Add correlation ID to log record.
-        
-        Args:
-            record: Log record to filter
-            
-        Returns:
-            True (always pass the record through)
-        """
+        """로그 레코드에 correlation ID를 붙인다 (항상 통과)."""
         record.correlation_id = correlation_id_var.get() or "N/A"
         return True
 
 
 class StructuredFormatter(logging.Formatter):
-    """Structured log formatter with consistent field ordering."""
-    
+    """필드 순서가 일정한 구조화 로그 formatter."""
+
     def format(self, record: logging.LogRecord) -> str:
-        """
-        Format log record with structured fields.
-        
-        Args:
-            record: Log record to format
-            
-        Returns:
-            Formatted log message
-        """
-        # Build structured log message
+        """[시각][레벨][correlation ID][로거명] 메시지 형태로 포맷한다."""
+        # 구조화 로그 메시지 조립
         parts = [
             f"[{self.formatTime(record, self.datefmt)}]",
             f"[{record.levelname}]",
@@ -57,7 +41,7 @@ class StructuredFormatter(logging.Formatter):
             record.getMessage(),
         ]
         
-        # Add exception info if present
+        # 예외 정보가 있으면 덧붙인다
         if record.exc_info:
             parts.append("\n" + self.formatException(record.exc_info))
         
@@ -65,67 +49,62 @@ class StructuredFormatter(logging.Formatter):
 
 
 def setup_logging(log_level: str = "INFO") -> None:
-    """
-    Configure structured logging for the application.
-    
+    """애플리케이션의 구조화 로깅을 설정한다.
+
     Args:
-        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_level: 로깅 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
-    # Convert log level string to constant
+    # 레벨 문자열을 상수로 변환
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
-    
+
     for name in ["api", "core", "io_board", "services"]:
-        # Configure logger
+        # 최상위 패키지별 로거 설정
         logger = logging.getLogger(name)
         logger.setLevel(numeric_level)
-        
-        # Remove existing handlers
+
+        # 기존 handler 제거 (중복 로그 방지)
         for handler in logger.handlers[:]:
             logger.removeHandler(handler)
-        
-        # Create console handler with structured formatter
+
+        # 구조화 formatter를 적용한 콘솔 handler 생성
         handler = logging.StreamHandler()
         handler.setLevel(numeric_level)
-        
-        # Apply structured formatter
+
         formatter = StructuredFormatter(
             fmt="%(asctime)s.%(msecs)03d %(message)s",
-            #datefmt="%Y-%m-%d %H:%M:%S"
         )
         formatter.default_msec_format = "%s.%03d"
         handler.setFormatter(formatter)
-        
-        # Add correlation ID filter
+
+        # correlation ID filter 추가
         handler.addFilter(CorrelationIdFilter())
-        
+
         logger.addHandler(handler)
-        
-        # Prevent propagation to root logger
+
+        # root 로거로의 전파 차단
         logger.propagate = False
 
 
 def get_logger(name: str) -> logging.Logger:
-    """
-    Get a logger instance with the given name.
-    
+    """지정 이름의 로거 인스턴스를 반환한다.
+
     Args:
-        name: Logger name (typically __name__ of the module)
-        
+        name: 로거 이름 (보통 모듈의 __name__)
+
     Returns:
-        Configured logger instance
+        설정된 로거 인스턴스
     """
     return logging.getLogger(f"io_board.{name}")
 
 
 def set_correlation_id(correlation_id: Optional[str] = None) -> str:
-    """
-    Set correlation ID for the current context.
-    
+    """현재 컨텍스트의 correlation ID를 설정한다.
+
     Args:
-        correlation_id: Correlation ID to set (generates UUID if None)
-        
+        correlation_id: 설정할 correlation ID (None이면 UUID 생성)
+
     Returns:
-        The correlation ID that was set
+        설정된 correlation ID
     """
     if correlation_id is None:
         correlation_id = str(uuid.uuid4())
@@ -134,53 +113,39 @@ def set_correlation_id(correlation_id: Optional[str] = None) -> str:
 
 
 def get_correlation_id() -> Optional[str]:
-    """
-    Get the current correlation ID.
-    
-    Returns:
-        Current correlation ID or None if not set
-    """
+    """현재 correlation ID를 반환한다 (미설정 시 None)."""
     return correlation_id_var.get()
 
 
 def clear_correlation_id() -> None:
-    """Clear the current correlation ID."""
+    """현재 correlation ID를 초기화한다."""
     correlation_id_var.set(None)
 
 
 class PerformanceLogger:
-    """Context manager for logging operation performance."""
-    
+    """작업 소요 시간을 로깅하는 context manager."""
+
     def __init__(self, logger: logging.Logger, operation: str, **context: Any) -> None:
         """
-        Initialize performance logger.
-        
         Args:
-            logger: Logger instance to use
-            operation: Name of the operation being measured
-            **context: Additional context to log
+            logger: 사용할 로거 인스턴스
+            operation: 측정 대상 작업 이름
+            **context: 로그에 함께 남길 추가 컨텍스트
         """
         self.logger = logger
         self.operation = operation
         self.context = context
         self.start_time: Optional[float] = None
-    
+
     def __enter__(self) -> "PerformanceLogger":
-        """Start performance measurement."""
+        """측정 시작."""
         self.start_time = time.perf_counter()
         context_str = " ".join(f"{k}={v}" for k, v in self.context.items())
         self.logger.debug(f"Starting {self.operation} {context_str}".strip())
         return self
-    
+
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """
-        End performance measurement and log results.
-        
-        Args:
-            exc_type: Exception type if an error occurred
-            exc_val: Exception value if an error occurred
-            exc_tb: Exception traceback if an error occurred
-        """
+        """측정을 종료하고 소요 시간(성공/실패)을 로깅한다."""
         if self.start_time is None:
             return
         
@@ -199,17 +164,16 @@ class PerformanceLogger:
 
 
 def log_payload(logger: logging.Logger, direction: str, data: bytes, label: str = "") -> None:
-    """
-    Log binary payload data in hex format.
-    
+    """바이너리 payload를 hex 형식으로 로깅한다.
+
     Args:
-        logger: Logger instance to use
-        direction: Direction indicator (e.g., "TX", "RX")
-        data: Binary data to log
-        label: Optional label for the payload
+        logger: 사용할 로거 인스턴스
+        direction: 방향 표시 (예: "TX", "RX")
+        data: 로깅할 바이너리 데이터
+        label: payload에 붙일 선택적 라벨
     """
     hex_data = data.hex().upper()
-    # Format as space-separated hex pairs
+    # 공백으로 구분한 hex 쌍으로 포맷
     formatted = " ".join(hex_data[i:i+2] for i in range(0, len(hex_data), 2))
     label_str = f" {label}" if label else ""
     logger.debug(f"{direction}{label_str}: {formatted} ({len(data)} bytes)")

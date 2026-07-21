@@ -1,14 +1,13 @@
-"""
-IO Board binary protocol implementation.
+"""IO Board 바이너리 protocol 구현.
 
-This module implements the binary communication protocol for the IO Board device
-using the Construct library for declarative binary parsing and building.
+Construct 라이브러리의 선언적 바이너리 파싱/빌드를 이용해
+IO Board 디바이스와의 통신 protocol을 구현한다.
 
-Protocol Frame Structure:
-    [STX 0x02][CMD 2B][SUBCMD 2B][DATA VAR][ETX 0x03][CHECKSUM 1B]
+Protocol frame 구조:
+    [STX 0x02][CMD 2B][SUBCMD 2B][DATA 가변][ETX 0x03][CHECKSUM 1B]
 
-Checksum Calculation:
-    XOR of all bytes between STX (exclusive) and ETX (exclusive)
+Checksum 계산:
+    STX 다음 바이트부터 ETX까지(ETX 포함)의 모든 바이트 XOR
 """
 
 from functools import reduce
@@ -40,19 +39,18 @@ ETX = b"\x03"  # End of Text
 
 
 def seek_and_read(stream: IO[bytes], offset: int, length: int) -> bytes:
-    """
-    Read data from stream at specified offset without changing position.
-    
-    This helper function is used by the Checksum construct to read the data
-    range that needs to be checksummed without affecting the current stream position.
-    
+    """스트림 위치를 바꾸지 않고 지정 offset에서 데이터를 읽는다.
+
+    Checksum construct가 현재 스트림 위치에 영향을 주지 않으면서
+    checksum 대상 구간을 읽을 때 사용하는 helper.
+
     Args:
-        stream: Byte stream to read from
-        offset: Byte offset to start reading
-        length: Number of bytes to read
-        
+        stream: 읽을 바이트 스트림
+        offset: 읽기 시작 offset
+        length: 읽을 바이트 수
+
     Returns:
-        Bytes read from the specified range
+        지정 구간에서 읽은 바이트
     """
     org_pos = stream.tell()
     stream.seek(offset)
@@ -62,16 +60,13 @@ def seek_and_read(stream: IO[bytes], offset: int, length: int) -> bytes:
 
 
 def calculate_checksum(data: bytes) -> int:
-    """
-    Calculate XOR checksum for protocol message.
-    
-    The checksum is calculated by XORing all bytes in the data.
-    
+    """protocol 메시지의 XOR checksum을 계산한다.
+
     Args:
-        data: Bytes to calculate checksum for
-        
+        data: checksum을 계산할 바이트
+
     Returns:
-        Single-byte XOR checksum value (0-255)
+        1바이트 XOR checksum 값 (0-255)
     """
     return reduce(lambda x, y: x ^ y, data, 0)
 
@@ -161,19 +156,18 @@ ResponseProtocol = Struct(
 
 
 def build_request(command: str, subcommand: str, data: Dict[str, Any]) -> bytes:
-    """
-    Build a protocol request message.
-    
+    """protocol request 메시지를 빌드한다.
+
     Args:
-        command: Command code (2 characters, e.g., "MC", "RQ")
-        subcommand: Subcommand code (2 characters, e.g., "PD", "MI")
-        data: Command-specific data dictionary
-        
+        command: command 코드 (2자, 예: "MC", "RQ")
+        subcommand: subcommand 코드 (2자, 예: "PD", "MI")
+        data: command별 데이터 딕셔너리
+
     Returns:
-        Binary protocol message ready for transmission
-        
+        전송 가능한 바이너리 protocol 메시지
+
     Raises:
-        ProtocolError: If message building fails
+        ProtocolError: 메시지 빌드 실패 시
     """
     try:
         logger.debug(f"Building request: command={command} subcommand={subcommand} data={data}")
@@ -191,17 +185,16 @@ def build_request(command: str, subcommand: str, data: Dict[str, Any]) -> bytes:
 
 
 def parse_response(message: bytes) -> Any:
-    """
-    Parse a protocol response message.
-    
+    """protocol response 메시지를 파싱한다.
+
     Args:
-        message: Binary protocol message received from device
-        
+        message: 디바이스에서 수신한 바이너리 protocol 메시지
+
     Returns:
-        Parsed response structure with COMMAND, SUBCOMMAND, and DATA fields
-        
+        COMMAND, SUBCOMMAND, DATA 필드를 갖는 파싱된 응답 구조체
+
     Raises:
-        ProtocolError: If message parsing fails or checksum is invalid
+        ProtocolError: 메시지 파싱 실패 또는 checksum 불일치 시
     """
     try:
         logger.debug(f"Parsing response message: {message.hex()}")
@@ -213,8 +206,8 @@ def parse_response(message: bytes) -> Any:
         return response
     except ConstructError as e:
         error_msg = str(e)
-        
-        # Provide more specific error messages
+
+        # 실패 원인별로 구체적인 에러 코드를 부여한다
         if "checksum" in error_msg.lower():
             raise ProtocolError(
                 "Protocol checksum validation failed",

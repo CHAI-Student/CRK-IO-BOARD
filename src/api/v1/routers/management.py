@@ -1,3 +1,9 @@
+"""관리(management) router — 초기화, calibration, 제조번호, 에러 로그, 재부팅.
+
+모든 route가 summary/description을 명시하므로 함수 docstring은 OpenAPI에
+노출되지 않는다.
+"""
+
 from fastapi import APIRouter
 
 from services.io_board import commands
@@ -30,7 +36,7 @@ router = APIRouter(
     description="Initialize the IO Board device. Should be called after device power-on or reset.",
 )
 async def initialize_device() -> SuccessResponse:
-    """Initialize the IO Board device."""
+    """IO Board 디바이스를 초기화한다."""
     await commands.initialize()
     return SuccessResponse(message="IO Board initialized successfully")
 
@@ -48,7 +54,7 @@ async def initialize_device() -> SuccessResponse:
     description="Calibrate all loadcell weight sensors. Device should be unloaded before calibration.",
 )
 async def calibrate_loadcells() -> SuccessResponse:
-    """Calibrate IO Board sensors."""
+    """loadcell 센서를 calibrate한다 (무부하 상태 필요)."""
     await commands.calibrate()
     return SuccessResponse(message="Calibration completed successfully")
 
@@ -66,7 +72,7 @@ async def calibrate_loadcells() -> SuccessResponse:
     description="Retrieve the device manufacturing/product ID (11 alphanumeric characters).",
 )
 async def get_manufacturing_number() -> ManufacturingNumberResponse:
-    """Get device manufacturing number."""
+    """디바이스 제조번호를 조회한다."""
     info = await commands.get_product_info()
     return ManufacturingNumberResponse(manufacturing_number=info["product_id"])
 
@@ -87,14 +93,13 @@ async def get_manufacturing_number() -> ManufacturingNumberResponse:
 async def set_manufacturing_number(
     request: ManufacturingNumberRequest,
 ) -> ManufacturingNumberResponse:
-    """
-    Set device manufacturing number.
+    """디바이스 제조번호를 설정한다.
 
     Args:
-        request: Manufacturing number (11 characters)
+        request: 제조번호 (11자)
 
     Returns:
-        Manufacturing number as confirmed by device
+        디바이스가 확인(echo back)한 제조번호
     """
     result = await commands.set_manufacturing_number(request.manufacturing_number)
     return ManufacturingNumberResponse(manufacturing_number=result)
@@ -113,7 +118,7 @@ async def set_manufacturing_number(
     description="Retrieve the device software/firmware version.",
 )
 async def get_software_version() -> SoftwareVersionResponse:
-    """Get device software version."""
+    """디바이스 소프트웨어/펌웨어 버전을 조회한다."""
     info = await commands.get_product_info()
     return SoftwareVersionResponse(sw_version=info["sw_version"])
 
@@ -131,7 +136,7 @@ async def get_software_version() -> SoftwareVersionResponse:
     description="Reboot the IO Board device (hard reboot via relay with timer). Device will be unavailable during restart and may not reply due to power interrupt.",
 )
 async def reboot_device() -> SuccessResponse:
-    """Reboot IO Board device (hard reboot via relay with timer). Device may not reply due to power interrupt."""
+    """IO Board를 재부팅한다 (타이머 릴레이 하드 재부팅). 전원 차단으로 응답이 없을 수 있다."""
     await commands.reboot()
     return SuccessResponse(message="Device reboot initiated")
 
@@ -149,7 +154,7 @@ async def reboot_device() -> SuccessResponse:
     description="Retrieve device manufacturing information including product ID and software version.",
 )
 async def get_product_info() -> ProductInfoResponse:
-    """Get device product information."""
+    """디바이스 제조 정보(product ID + 버전)를 조회한다."""
     info = await commands.get_product_info()
     return ProductInfoResponse(
         product_id=info["product_id"],
@@ -170,7 +175,7 @@ async def get_product_info() -> ProductInfoResponse:
     description="Retrieve device error history (up to 4 error codes).",
 )
 async def get_errors() -> ErrorListResponse:
-    """Get device error history."""
+    """디바이스 에러 히스토리를 조회한다 (최대 4건)."""
     errors = await commands.get_errors()
     return ErrorListResponse(errors=[ErrorItem(code=err) for err in errors])
 
@@ -188,6 +193,6 @@ async def get_errors() -> ErrorListResponse:
     description="Clear all error codes from the device error history.",
 )
 async def clear_errors() -> SuccessResponse:
-    """Clear device error log."""
+    """디바이스 에러 로그를 비운다."""
     await commands.clear_errors()
     return SuccessResponse(message="Error log cleared successfully")
