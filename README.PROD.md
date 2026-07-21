@@ -122,6 +122,20 @@ IO 보드 상태를 주기적으로 읽어오는 폴링 서비스의 간격 설�
 
 ---
 
+### 5. 헬스 체크 임계값 설정 (`IO_BOARD__HEALTH__*`)
+
+`/health` 엔드포인트의 door/loadcell/deadbolt 판정 임계값입니다.
+(기본값은 종전 하드코딩 값과 동일합니다.)
+
+| 환경 변수 | 기본값 | 설명 |
+|---|---|---|
+| `IO_BOARD__HEALTH__LOADCELL_MIN_GRAMS` | `-40000` | 로드셀 정상 판독 최소값 (g). 범위 밖이면 UNHEALTHY |
+| `IO_BOARD__HEALTH__LOADCELL_MAX_GRAMS` | `40000` | 로드셀 정상 판독 최대값 (g). 범위 밖이면 UNHEALTHY |
+| `IO_BOARD__HEALTH__DOOR_OPEN_ERROR_SECONDS` | `180` | door가 이 시간(초, 양수만 허용) 넘게 열려 있으면 UNHEALTHY |
+| `IO_BOARD__HEALTH__DEADBOLT_APPLY_TIMEOUT_SECONDS` | `5` | deadbolt 제어 후 이 시간(초, 양수만 허용) 내 상태 미반영 시 UNHEALTHY |
+
+---
+
 ## 현재 설정값 확인
 
 아래 명령을 실행하면 현재 적용된 모든 설정값을 JSON 형식으로 출력할 수 있습니다.

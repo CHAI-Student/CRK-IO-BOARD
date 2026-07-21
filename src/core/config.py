@@ -1,8 +1,12 @@
-"""
-Configuration management for IO Board module.
+"""IO Board 서비스 설정 관리.
 
-This module provides enterprise-grade configuration management using environment
-variables with validation and type safety.
+pydantic-settings 기반으로 환경변수(IO_BOARD__ prefix, __ 구분자)에서
+설정을 읽으며, 검증과 타입 안전성을 제공한다.
+
+주요 기본값 (throttle/sanitizer 관련 — 임의 변경 금지):
+- polling.loadcells_poll_interval = 0.8s
+- polling.loadcells_min_request_gap = 0.75s (sign-glitch 방지 throttle)
+- sanitize.* : issue #1 실측 기반 sign-glitch 보정 파라미터
 """
 
 import os
@@ -12,7 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SerialModel(BaseModel):
-    """Serial port configuration settings."""
+    """serial 포트 설정 (포트/baudrate/timeout/retry)."""
 
     port: str = Field(
         default="COM3" if os.name == "nt" else "/dev/ttyUSB0",
@@ -79,7 +83,7 @@ class SerialModel(BaseModel):
 
 
 class APIModel(BaseModel):
-    """API server configuration settings."""
+    """API 서버 설정 (host/port/log level/graceful shutdown)."""
 
     host: str = Field(
         default="0.0.0.0",
@@ -126,7 +130,7 @@ class APIModel(BaseModel):
 
 
 class PollingModel(BaseModel):
-    """Polling service configuration settings."""
+    """polling 서비스 설정 (poll interval, loadcell request throttle)."""
 
     loadcells_poll_interval: float = Field(
         default=0.8,
@@ -161,11 +165,11 @@ class PollingModel(BaseModel):
 
 
 class SanitizeModel(BaseModel):
-    """Loadcell reading sanitizer settings (sign-glitch fix + quantization).
+    """loadcell sanitizer 설정 (sign-glitch 보정 + quantization).
 
-    Defaults are derived from the issue #1 flicker capture: glitches are
-    single-frame, magnitude-preserving sign inversions (~12% of frames),
-    and the LABD-B3/K3 guaranteed resolution is 5 g.
+    기본값은 issue #1 flicker 캡처 실측에서 도출됐다: glitch는 단일
+    frame의 크기 보존 부호 반전(전체 frame의 ~12%)이며, LABD-B3/K3의
+    보증 resolution은 5g이다.
     """
 
     enabled: bool = Field(
@@ -222,8 +226,39 @@ class SanitizeModel(BaseModel):
         return value
 
 
+class HealthModel(BaseModel):
+    """/health 판정 임계값 설정 (loadcell 정상 범위, door/deadbolt 타임아웃).
+
+    기본값은 기존 하드코딩 값과 동일하다 (±40000g / 180s / 5s).
+    """
+
+    loadcell_min_grams: int = Field(
+        default=-40000,
+        description="Minimum plausible loadcell reading in grams for /health",
+    )
+    loadcell_max_grams: int = Field(
+        default=40000,
+        description="Maximum plausible loadcell reading in grams for /health",
+    )
+    door_open_error_seconds: float = Field(
+        default=180.0,
+        description="Report door UNHEALTHY when it stays open longer than this (seconds)",
+    )
+    deadbolt_apply_timeout_seconds: float = Field(
+        default=5.0,
+        description="Report deadbolt UNHEALTHY when a control request is not "
+        "reflected within this many seconds",
+    )
+
+    @field_validator("door_open_error_seconds", "deadbolt_apply_timeout_seconds", mode="after")
+    def validate_positive_seconds(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError(f"Timeout must be positive, got {value}")
+        return value
+
+
 class Settings(BaseSettings):
-    """Global application settings."""
+    """애플리케이션 전역 설정 (환경변수 IO_BOARD__* 에서 로드)."""
 
     model_config = SettingsConfigDict(
         env_prefix="IO_BOARD__",
@@ -234,6 +269,7 @@ class Settings(BaseSettings):
     api: APIModel = APIModel()
     polling: PollingModel = PollingModel()
     sanitize: SanitizeModel = SanitizeModel()
+    health: HealthModel = HealthModel()
 
 
 if __name__ == "__main__":
