@@ -1,22 +1,15 @@
 """
 Unit tests for the loadcell sanitizer (sign-glitch correction + quantization).
 
-INSTALLATION:
-1. Create 'tests' directory in project root
-2. Move this file to tests/test_sanitizer.py
-3. Install: pip install pytest
-4. Run: pytest tests/test_sanitizer.py
+Run: pytest tests/test_sanitizer_standalone.py
 
 Covers the firmware sign-glitch defect from issue #1: single-frame,
 magnitude-preserving sign inversions walking across channels.
 """
 
 import sys
-from pathlib import Path
 
-# Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
+# src/ import 경로는 pyproject.toml [tool.pytest.ini_options] pythonpath가 제공한다.
 from core.config import SanitizeModel
 from services.io_board.sanitizer import LoadcellSanitizer
 

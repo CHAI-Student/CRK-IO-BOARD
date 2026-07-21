@@ -1,11 +1,7 @@
 """
 Unit tests for the loadcell request throttle.
 
-INSTALLATION:
-1. Create 'tests' directory in project root
-2. Move this file to tests/test_throttle.py
-3. Install: pip install pytest
-4. Run: pytest tests/test_throttle.py
+Run: pytest tests/test_throttle_standalone.py
 
 The firmware reports garbage signs when RQIW requests are spaced closer
 than ~0.7s (docs/FIRMWARE_SIGN_GLITCH_REQUEST.md), so all consumers share
@@ -14,14 +10,10 @@ one throttled gate; faster calls get the cached frame.
 
 import asyncio
 import sys
-import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from types import SimpleNamespace
 
-# Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
+# src/ import 경로는 pyproject.toml [tool.pytest.ini_options] pythonpath가 제공한다.
 import services.io_board.commands as commands
 from core.config import SanitizeModel
 from services.io_board.sanitizer import configure_sanitizer

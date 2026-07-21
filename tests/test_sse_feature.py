@@ -1,16 +1,12 @@
 """
-Basic tests for the new SSE streaming feature.
+Basic tests for the SSE streaming feature (filters + change detector).
 
-Run with: python test_sse_feature.py
+Run: pytest tests/test_sse_feature.py
 """
 
 import sys
-from pathlib import Path
 
-# Add src to path
-src_path = Path(__file__).parent / "src"
-sys.path.insert(0, str(src_path))
-
+# src/ import 경로는 pyproject.toml [tool.pytest.ini_options] pythonpath가 제공한다.
 from io_board.filters import (
     FilterMethod,
     ThresholdScope,
