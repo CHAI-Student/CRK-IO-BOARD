@@ -131,6 +131,35 @@ async def get_serial_connection():
             ) from e
 
 
+async def _drain_stale_input(reader: asyncio.StreamReader) -> None:
+    """수신 buffer에 남아있는 오래된(orphaned) 바이트를 모두 버린다.
+
+    이전 교환에서 지연 도착한 응답 조각이 buffer에 남아있으면 이번에 보낼
+    요청의 응답과 뒤섞여 CMD/SUBCMD mismatch를 유발할 수 있다 (여러
+    polling 서비스가 하나의 serial 연결을 공유하므로, 한 교환이 timeout
+    등으로 어긋나면 그 응답이 다음 무관한 요청의 응답인 것처럼 읽힐 수
+    있음). 새 요청을 보내기 전에 아주 짧은 timeout으로 반복 읽어 남은
+    바이트를 모두 버린다.
+
+    Args:
+        reader: serial 포트의 비동기 stream reader
+    """
+    drained = b""
+    while True:
+        try:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=0.05)
+        except asyncio.TimeoutError:
+            break
+        if not chunk:
+            break
+        drained += chunk
+    if drained:
+        logger.warning(
+            f"Discarded {len(drained)} stale byte(s) from serial input buffer "
+            f"before sending request: {drained.hex()}"
+        )
+
+
 async def _fetch_with_timeout(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
@@ -210,6 +239,10 @@ async def fetch(message: bytes) -> bytes:
             reader, writer = await get_serial_connection()
 
             try:
+                # 이전 교환에서 남은 orphaned 바이트가 이번 응답과 뒤섞이지
+                # 않도록, 요청을 보내기 전에 buffer를 비운다
+                await _drain_stale_input(reader)
+
                 # exponential backoff retry 루프
                 retry_delay = config.initial_retry_delay
                 last_exception: Optional[Exception] = None
@@ -227,11 +260,14 @@ async def fetch(message: bytes) -> bytes:
                             f"Timeout on attempt {attempt}/{config.max_retries} "
                             f"(will retry in {retry_delay:.3f}s)"
                         )
-                        
+
                         if attempt < config.max_retries:
                             await asyncio.sleep(retry_delay)
                             retry_delay *= config.retry_backoff_multiplier
-                    
+                            # timeout된 요청의 응답이 뒤늦게 도착해 다음
+                            # 재전송의 응답과 뒤섞이지 않도록 재전송 전에도 비운다
+                            await _drain_stale_input(reader)
+
                     except asyncio.IncompleteReadError as e:
                         last_exception = e
                         logger.warning(
@@ -239,10 +275,11 @@ async def fetch(message: bytes) -> bytes:
                             f"expected={e.expected} received={len(e.partial)} "
                             f"(will retry in {retry_delay:.3f}s)"
                         )
-                        
+
                         if attempt < config.max_retries:
                             await asyncio.sleep(retry_delay)
                             retry_delay *= config.retry_backoff_multiplier
+                            await _drain_stale_input(reader)
                 
                 # 모든 retry 소진
                 if isinstance(last_exception, asyncio.TimeoutError):

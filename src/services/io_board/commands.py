@@ -12,11 +12,11 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from exceptions import DeviceError, ErrorCode, ValidationError
+from exceptions import DeviceError, ErrorCode, ProtocolError, ValidationError
 from core.logging_config import PerformanceLogger, get_logger
 from services.io_board.protocol import build_request, parse_response
 from services.io_board.sanitizer import sanitize_loadcells
-from services.io_board.serial_io import fetch
+from services.io_board.serial_io import fetch, get_serial_config
 from services.io_board.io_types import (
     CommandType,
     DeadboltAction,
@@ -51,7 +51,8 @@ async def _send_command(
 
     Raises:
         ValidationError: command/subcommand 타입이 불일치할 때
-        ProtocolError: protocol 빌드/파싱 실패 시
+        ProtocolError: protocol 빌드/파싱 실패 시, 또는 재시도 후에도
+            응답의 CMD/SUBCMD가 계속 일치하지 않을 시
         SerialCommunicationError: serial 통신 실패 시
     """
 
@@ -63,8 +64,14 @@ async def _send_command(
     with PerformanceLogger(logger, "command", cmd=f"{command.value}/{subcommand.value}"):
         # Build request message
         request_message = build_request(command.value, subcommand.value, data)
+        max_retries = get_serial_config().max_retries
 
-        while True:
+        # 응답의 CMD/SUBCMD가 요청과 다르면(다른 동시 요청의 응답과 뒤섞인
+        # 경우) 재시도한다. 무한 루프를 막기 위해 serial retry와 같은
+        # max_retries로 상한을 둔다 — 계속 어긋나면 호출자가 빠르게 실패를
+        # 받도록 ProtocolError를 raise한다 (R-3와 동일하게 CancelledError는
+        # 전파됨).
+        for attempt in range(1, max_retries + 1):
             # serial로 송수신
             response_message = await fetch(request_message)
 
@@ -76,11 +83,19 @@ async def _send_command(
                 logger.warning(
                     f"Unexpected response CMD/SUBCMD: "
                     f"expected {command.value}/{subcommand.value}, "
-                    f"got {response.COMMAND}/{response.SUBCOMMAND}. Retrying..."
+                    f"got {response.COMMAND}/{response.SUBCOMMAND}. "
+                    f"Retrying ({attempt}/{max_retries})..."
                 )
                 continue  # 예상과 다른 응답이면 재시도
 
             return response
+
+        raise ProtocolError(
+            f"Response CMD/SUBCMD kept mismatching expected "
+            f"{command.value}/{subcommand.value} after {max_retries} attempts",
+            ErrorCode.PROTOCOL_INVALID_RESPONSE,
+            {"command": command.value, "subcommand": subcommand.value}
+        )
 
 
 @asynccontextmanager
