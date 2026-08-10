@@ -67,6 +67,7 @@ class TestSerialModel:
         assert config.max_retries == 3
         assert config.initial_retry_delay == 0.1
         assert config.retry_backoff_multiplier == 2.0
+        assert config.inter_command_gap == 0.0
 
     def test_invalid_baudrate(self):
         """Test that invalid baudrate raises ValueError."""
@@ -92,6 +93,10 @@ class TestSerialModel:
         """Test that invalid backoff multiplier raises ValueError."""
         with pytest.raises(ValueError, match="backoff multiplier must be"):
             SerialModel(retry_backoff_multiplier=0.5)
+
+    def test_invalid_inter_command_gap(self):
+        with pytest.raises(ValueError, match="Inter-command gap must be non-negative"):
+            SerialModel(inter_command_gap=-0.1)
 
 
 class TestAPIModel:
@@ -200,6 +205,7 @@ class TestSettingsLoading:
         """Test loading configuration from environment variables."""
         clean_env.setenv("IO_BOARD__SERIAL__PORT", "COM5")
         clean_env.setenv("IO_BOARD__SERIAL__BAUDRATE", "115200")
+        clean_env.setenv("IO_BOARD__SERIAL__INTER_COMMAND_GAP", "0.2")
         clean_env.setenv("IO_BOARD__API__HOST", "127.0.0.1")
         clean_env.setenv("IO_BOARD__API__PORT", "9000")
         clean_env.setenv("IO_BOARD__HEALTH__DOOR_OPEN_ERROR_SECONDS", "300")
@@ -207,6 +213,7 @@ class TestSettingsLoading:
         settings = Settings()
         assert settings.serial.port == "COM5"
         assert settings.serial.baudrate == 115200
+        assert settings.serial.inter_command_gap == 0.2
         assert settings.api.host == "127.0.0.1"
         assert settings.api.port == 9000
         assert settings.health.door_open_error_seconds == 300.0

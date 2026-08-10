@@ -1,5 +1,17 @@
 # IO Board Module - Changelog
 
+## Version 2.0.7 - Wire Inter-command Gap Experiment (2026-08-10)
+
+### 🧪 Diagnostics
+
+- Added `IO_BOARD__SERIAL__INTER_COMMAND_GAP`, a configurable minimum quiet
+  interval from a complete RX frame to the next actual wire TX. It is enforced
+  inside the serial transaction lock, so SSE, health, recording, HTTP calls,
+  and retries all participate in the same experiment.
+- Unexpected-response diagnostics now include the measured `rx_to_tx_gap_ms`.
+- Removed the temporary 50 ms sleep from the `/loadcells` HTTP handler because
+  it did not cover the other loadcell consumers or cross-command traffic.
+
 ## Version 2.0.6 - Serial Mismatch Diagnostics (2026-08-10)
 
 ### 🔍 Diagnostics

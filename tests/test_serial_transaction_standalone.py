@@ -29,9 +29,19 @@ def _frame(command: str, subcommand: str, data: bytes = b"") -> bytes:
     return b"\x02" + payload + bytes([checksum])
 
 
-def _setup(monkeypatch, *, max_retries: int = 3, retry_delay: float = 0.01):
+def _setup(
+    monkeypatch,
+    *,
+    max_retries: int = 3,
+    retry_delay: float = 0.01,
+    inter_command_gap: float = 0.0,
+):
     serial_io.configure_serial(
-        SerialModel(max_retries=max_retries, initial_retry_delay=retry_delay)
+        SerialModel(
+            max_retries=max_retries,
+            initial_retry_delay=retry_delay,
+            inter_command_gap=inter_command_gap,
+        )
     )
     reader = object()
     writer = _Writer()
@@ -199,6 +209,37 @@ def test_wire_min_gap_applies_to_timeout_retry(monkeypatch):
     asyncio.run(run())
     assert len(send_times) == 2
     assert send_times[1] - send_times[0] >= 0.045
+
+
+def test_inter_command_gap_is_measured_from_complete_rx(monkeypatch):
+    _setup(monkeypatch, inter_command_gap=0.05)
+    send_times: list[float] = []
+    rx_complete_times: list[float] = []
+
+    async def respond(_reader, _writer, message):
+        send_times.append(asyncio.get_running_loop().time())
+        await asyncio.sleep(0.005)
+        rx_complete_times.append(asyncio.get_running_loop().time())
+        command, subcommand = serial_io._response_codes(message)
+        return _frame(command, subcommand)
+
+    monkeypatch.setattr(serial_io, "_fetch_with_timeout", respond)
+
+    async def run():
+        await serial_io.fetch(
+            _frame("RQ", "ID"),
+            expected_command="RQ",
+            expected_subcommand="ID",
+        )
+        await serial_io.fetch(
+            _frame("RQ", "IW"),
+            expected_command="RQ",
+            expected_subcommand="IW",
+        )
+
+    asyncio.run(run())
+    assert len(send_times) == 2
+    assert send_times[1] - rx_complete_times[0] >= 0.045
 
 
 def test_loadcell_command_passes_configured_gap_to_wire(monkeypatch):

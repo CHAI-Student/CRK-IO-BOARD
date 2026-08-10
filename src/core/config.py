@@ -50,6 +50,11 @@ class SerialModel(BaseModel):
         default=2.0,
         description="Retry backoff multiplier",
     )
+    inter_command_gap: float = Field(
+        default=0.0,
+        description="Minimum quiet time from a complete RX frame to the next "
+        "wire TX in seconds; 0 disables the explicit gate",
+    )
 
     @field_validator("baudrate", mode="after")
     def validate_baudrate(cls, value: int) -> int:
@@ -79,6 +84,12 @@ class SerialModel(BaseModel):
     def validate_retry_backoff_multiplier(cls, value: float) -> float:
         if value < 1.0:
             raise ValueError(f"Retry backoff multiplier must be >= 1.0, got {value}")
+        return value
+
+    @field_validator("inter_command_gap", mode="after")
+    def validate_inter_command_gap(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError(f"Inter-command gap must be non-negative, got {value}")
         return value
 
 

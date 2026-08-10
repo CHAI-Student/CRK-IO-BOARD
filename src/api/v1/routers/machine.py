@@ -278,7 +278,6 @@ class LoadCellsResponse(BaseModel):
 )
 async def handle_loadcells() -> LoadCellsResponse:
     """loadcell 무게 판독값을 조회한다 (throttle/sanitizer 적용)."""
-    await asyncio.sleep(0.05)
     loadcells = await commands.get_loadcells()
     return LoadCellsResponse(loadcells=loadcells)
 

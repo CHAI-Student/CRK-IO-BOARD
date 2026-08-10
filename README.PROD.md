@@ -46,6 +46,20 @@ IO 보드와의 시리얼 통신에 관한 설정입니다.
 | `IO_BOARD__SERIAL__MAX_RETRIES` | `3` | 명령 재시도 최대 횟수 (1 이상) |
 | `IO_BOARD__SERIAL__INITIAL_RETRY_DELAY` | `0.1` | 초기 재시도 대기 시간 (초, 양수만 허용) |
 | `IO_BOARD__SERIAL__RETRY_BACKOFF_MULTIPLIER` | `2.0` | 재시도 시 대기 시간 증가 배율 (1.0 이상) |
+| `IO_BOARD__SERIAL__INTER_COMMAND_GAP` | `0.0` | 완전한 응답 수신 후 다음 실제 시리얼 송신까지의 최소 간격(초). `0`이면 명시적 gate 비활성 |
+
+펌웨어가 서로 다른 명령을 연속 처리할 때 이전 응답을 재생하는지 검증하려면
+아래처럼 값을 바꿔 A/B 테스트합니다. 이 설정은 `/loadcells`뿐 아니라 SSE,
+health, recording과 내부 retry를 포함한 모든 실제 wire TX에 적용됩니다.
+
+```bash
+IO_BOARD__SERIAL__INTER_COMMAND_GAP=0.1 uv run src/main.py
+# 재현되면 0.2, 0.5 등으로 올려 비교
+```
+
+시작 로그의 `inter_command_gap=...`으로 적용 여부를 확인할 수 있고,
+`Unexpected response` 발생 시 `rx_to_tx_gap_ms`에 실제 직전 RX→현재 TX 간격이
+기록됩니다.
 
 > **참고:** Linux 환경에서 시리얼 포트에 접근하려면 해당 사용자가 `dialout` 그룹에 속해 있어야 할 수 있습니다.  
 > `sudo usermod -aG dialout $USER` 명령으로 추가한 후 재로그인하십시오.

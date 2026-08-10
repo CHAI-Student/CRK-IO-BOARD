@@ -43,6 +43,9 @@ class _WireTx:
 
 _transaction_sequence = 0
 _last_wire_tx: _WireTx | None = None
+# 마지막 완전한 frame(checksum 포함)을 읽은 monotonic 시각. 명령 종류와
+# 호출 경로에 관계없이 firmware에 실제 정숙 시간을 보장하는 데 사용한다.
+_last_rx_complete_time: float | None = None
 
 # protocol.py의 response schema와 동일한 전체 frame 길이
 # (STX + CMD/SUBCMD + DATA + ETX + LRC). mismatch frame은 정식 parser에
@@ -67,15 +70,16 @@ def configure_serial(config: SerialModel) -> None:
     Args:
         config: serial 설정 객체
     """
-    global _serial_config, _transaction_sequence, _last_wire_tx
+    global _serial_config, _transaction_sequence, _last_wire_tx, _last_rx_complete_time
     _serial_config = config
     _last_request_tx.clear()
     _transaction_sequence = 0
     _last_wire_tx = None
+    _last_rx_complete_time = None
     logger.info(
         f"Serial configured: port={config.port} baudrate={config.baudrate} "
         f"timeouts=({config.header_timeout}s/{config.body_timeout}s/{config.checksum_timeout}s) "
-        f"retries={config.max_retries}"
+        f"retries={config.max_retries} inter_command_gap={config.inter_command_gap}s"
     )
 
 
@@ -361,6 +365,32 @@ async def _respect_wire_min_gap(message: bytes, min_send_interval: float) -> Non
     _last_request_tx[key] = asyncio.get_running_loop().time()
 
 
+async def _respect_inter_command_gap(min_gap: float) -> None:
+    """완전한 RX frame과 다음 wire TX 사이의 전역 최소 간격을 강제한다.
+
+    API handler의 sleep과 달리 SSE, health, recording, retry를 포함한 모든
+    호출 경로에 적용된다. 호출부는 _serial_mutex를 보유한다.
+    """
+    if min_gap <= 0 or _last_rx_complete_time is None:
+        return
+    remaining = min_gap - (
+        asyncio.get_running_loop().time() - _last_rx_complete_time
+    )
+    if remaining > 0:
+        logger.debug(
+            f"Delaying next wire TX by {remaining:.3f}s to preserve "
+            f"RX-to-TX inter-command gap ({min_gap:.3f}s)"
+        )
+        await asyncio.sleep(remaining)
+
+
+def _rx_to_tx_gap_diagnostics(last_rx_time: float | None, tx_time: float) -> str:
+    """현재 TX 직전 완전한 RX와의 간격을 진단 문자열로 반환한다."""
+    if last_rx_time is None:
+        return "rx_to_tx_gap_ms=none"
+    return f"rx_to_tx_gap_ms={(tx_time - last_rx_time) * 1000:.3f}"
+
+
 async def fetch(
     message: bytes,
     *,
@@ -390,7 +420,7 @@ async def fetch(
     Raises:
         SerialCommunicationError: 모든 retry 후에도 통신이 실패한 경우
     """
-    global _transaction_sequence, _last_wire_tx
+    global _transaction_sequence, _last_wire_tx, _last_rx_complete_time
 
     config = get_serial_config()
 
@@ -414,15 +444,18 @@ async def fetch(
                     unexpected = 0
                     tx_time: float | None = None
                     previous_tx: _WireTx | None = None
+                    previous_rx_time: float | None = None
                     try:
                         logger.debug(
                             f"Transaction {transaction_id} attempt "
                             f"{attempt}/{config.max_retries}"
                         )
+                        await _respect_inter_command_gap(config.inter_command_gap)
                         await _respect_wire_min_gap(message, min_send_interval)
 
                         tx_time = asyncio.get_running_loop().time()
                         previous_tx = _last_wire_tx
+                        previous_rx_time = _last_rx_complete_time
                         tx_codes = _response_codes(message)
                         tx_command = tx_codes[0] if tx_codes else "??"
                         tx_subcommand = tx_codes[1] if tx_codes else "??"
@@ -434,6 +467,7 @@ async def fetch(
                             timestamp=tx_time,
                         )
                         response = await _fetch_with_timeout(reader, writer, message)
+                        _last_rx_complete_time = asyncio.get_running_loop().time()
 
                         # 다른 logical command의 늦은 응답을 받았으면 현재
                         # 요청을 다시 보내지 않는다. 이미 보낸 요청의 응답이
@@ -461,6 +495,7 @@ async def fetch(
                                     f"got={got} discarded={unexpected}/{config.max_retries} "
                                     f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
                                     f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
+                                    f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
                                     f"{_frame_diagnostics(response)}. "
                                     "Discarding without resend..."
                                 )
@@ -477,6 +512,7 @@ async def fetch(
                                         },
                                     )
                                 response = await _read_response_with_timeout(reader)
+                                _last_rx_complete_time = asyncio.get_running_loop().time()
                                 codes = _response_codes(response)
 
                         if discarded_total:
