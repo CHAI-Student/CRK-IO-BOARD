@@ -47,6 +47,11 @@ Sources: [src/io_board/protocol.py](src/io_board/protocol.py), [src/io_board/io_
 - Code uses LRC term “checksum” as XOR; matches CSV.
 - OpenAPI file is absent; rely on this spec plus source.
 - Loadcell value clamp/formatting for filters uses +/- five digits; aligns with hardware range.
+- A response mismatch remains unresolved: the board/serial path can return the
+  previous command's complete, checksum-valid response (`RQ/IW` and `RQ/ID`
+  have been observed exchanged). This can delay or fail deadbolt verification
+  and is a suspected contributor to loadcell raw SSE anomalies. See
+  [KNOWN_RESPONSE_MISMATCH.md](KNOWN_RESPONSE_MISMATCH.md) and issue #3.
 
 ### Error Code Meanings (device level from CSV)
 - DB01: command to unlock but remains locked.

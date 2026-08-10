@@ -42,6 +42,10 @@ Source: [src/io_board/config.py](src/io_board/config.py). All values validated a
 
 ### Operational Tips
 - Use DEBUG log level when diagnosing serial/protocol issues to see hex payloads and timing.
+- Treat `Unexpected response CMD/SUBCMD` as a known unresolved device/serial-path
+  fault, not harmless application noise. Follow
+  [KNOWN_RESPONSE_MISMATCH.md](KNOWN_RESPONSE_MISMATCH.md); preserve the frame
+  diagnostics because the issue can affect deadbolt operation and loadcell SSE.
 - Threshold/filter tuning for `/sse`: start with `filter_method=exponential&filter_alpha=0.2` and `threshold=5.0&threshold_scope=filtered`; adjust per noise level.
 - Device reboot via `/reboot` drops power briefly; expect missing replies during the relay action.
 - Calibration `/calibrate` should run when shelves are empty; otherwise subsequent readings offset.

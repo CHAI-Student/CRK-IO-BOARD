@@ -10,6 +10,7 @@ Embedded I/O control system with real-time Server-Sent Events (SSE) streaming, l
 - **[Architecture](docs/ARCHITECTURE.md)** - System design and data flow
 - **[Protocol Reference](docs/PROTOCOL.md)** - Binary communication protocol
 - **[Operations Guide](docs/OPERATIONS.md)** - Configuration, deployment, and troubleshooting
+- **[Known Serial Response Issue](docs/KNOWN_RESPONSE_MISMATCH.md)** - Unresolved response mismatch, impact, and recommended hardware/firmware work
 - **[Changelog](CHANGELOG.md)** - Version history, features, and breaking changes
 
 ## Documentation Structure
@@ -22,6 +23,7 @@ docs/
 ├── ARCHITECTURE.md          # System design
 ├── PROTOCOL.md              # Binary protocol
 ├── OPERATIONS.md            # Operations & config
+├── KNOWN_RESPONSE_MISMATCH.md # Unresolved serial response mismatch
 ├── OVERVIEW.md              # Overview documentation
 └── advanced/
     └── SSE_ARCHITECTURE.md  # Deep dive: SSE async flows
