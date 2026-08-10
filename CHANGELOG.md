@@ -1,5 +1,19 @@
 # IO Board Module - Changelog
 
+## Version 2.0.6 - Serial Mismatch Diagnostics (2026-08-10)
+
+### 🔍 Diagnostics
+
+- Unexpected CMD/SUBCMD warnings now include a monotonic transaction ID,
+  retry attempt, expected/received codes, time from TX to RX, previous wire TX
+  type and gap, complete RX frame hex and length, known response-size
+  classification, and independently calculated XOR checksum validity.
+- Timeout and incomplete-read warnings carry the same transaction context;
+  successful recovery after discarding an unrelated frame is logged explicitly.
+  This distinguishes a valid wrong firmware response from a request-sized echo,
+  a mixed header/payload frame, and UART/USB corruption without enabling verbose
+  payload logging for normal traffic.
+
 ## Version 2.0.5 - Transaction-Safe Serial Recovery (2026-08-10)
 
 ### 🐛 Fixes

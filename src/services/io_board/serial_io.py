@@ -8,6 +8,8 @@ mutex로 serial 포트 접근을 직렬화한다. 연결은 요청마다 열지 
 
 import asyncio
 import os
+from dataclasses import dataclass
+from functools import reduce
 from typing import Optional
 
 import serial
@@ -28,15 +30,48 @@ _serial_mutex = asyncio.Lock()
 _last_request_tx: dict[bytes, float] = {}
 
 
+@dataclass(frozen=True)
+class _WireTx:
+    """Mismatch 진단에 필요한 직전 wire TX 메타데이터."""
+
+    transaction_id: int
+    attempt: int
+    command: str
+    subcommand: str
+    timestamp: float
+
+
+_transaction_sequence = 0
+_last_wire_tx: _WireTx | None = None
+
+# protocol.py의 response schema와 동일한 전체 frame 길이
+# (STX + CMD/SUBCMD + DATA + ETX + LRC). mismatch frame은 정식 parser에
+# 넘기기 전에 폐기되므로 여기서 shape만 진단하기 위한 읽기 전용 표다.
+_RESPONSE_FRAME_LENGTHS: dict[tuple[str, str], int] = {
+    ("MC", "PD"): 7,
+    ("MC", "DC"): 8,
+    ("MC", "LZ"): 7,
+    ("MC", "WP"): 18,
+    ("MC", "EZ"): 7,
+    ("MC", "RT"): 7,
+    ("RQ", "MI"): 20,
+    ("RQ", "IW"): 67,
+    ("RQ", "ID"): 19,
+    ("RQ", "ER"): 23,
+}
+
+
 def configure_serial(config: SerialModel) -> None:
     """serial 통신 파라미터를 설정한다. startup 시 1회 호출.
 
     Args:
         config: serial 설정 객체
     """
-    global _serial_config
+    global _serial_config, _transaction_sequence, _last_wire_tx
     _serial_config = config
     _last_request_tx.clear()
+    _transaction_sequence = 0
+    _last_wire_tx = None
     logger.info(
         f"Serial configured: port={config.port} baudrate={config.baudrate} "
         f"timeouts=({config.header_timeout}s/{config.body_timeout}s/{config.checksum_timeout}s) "
@@ -234,6 +269,59 @@ def _response_codes(response: bytes) -> tuple[str, str] | None:
         return None
 
 
+def _xor_checksum(data: bytes) -> int:
+    """protocol checksum 구간(CMD부터 ETX 포함)의 XOR을 계산한다."""
+    return reduce(lambda left, right: left ^ right, data, 0)
+
+
+def _frame_diagnostics(response: bytes) -> str:
+    """정식 parser 전 mismatch frame의 무손실 진단 문자열을 만든다.
+
+    요청 echo, 정상적인 다른 response, header/payload 혼합, checksum 손상을
+    현장 로그 한 줄만으로 구분할 수 있도록 길이·shape·checksum·전체 hex를
+    기록한다. 이 함수는 진단만 하며 frame의 수락 여부에는 영향을 주지 않는다.
+    """
+    codes = _response_codes(response)
+    expected_length = _RESPONSE_FRAME_LENGTHS.get(codes) if codes else None
+
+    if len(response) >= 3 and response[0:1] == b"\x02" and response[-2:-1] == b"\x03":
+        calculated = _xor_checksum(response[1:-1])
+        received = response[-1]
+        checksum = (
+            f"valid(0x{received:02X})"
+            if calculated == received
+            else f"invalid(received=0x{received:02X},calculated=0x{calculated:02X})"
+        )
+    else:
+        checksum = "unavailable(incomplete-frame-markers)"
+
+    if len(response) == 7:
+        shape = "request-sized-or-empty-response"
+    elif expected_length is None:
+        shape = "unknown"
+    elif len(response) == expected_length:
+        shape = "known-response-size"
+    else:
+        shape = f"size-mismatch(expected={expected_length})"
+
+    return (
+        f"rx_len={len(response)} rx_shape={shape} rx_checksum={checksum} "
+        f"rx_hex={response.hex().upper()}"
+    )
+
+
+def _tx_gap_diagnostics(previous: _WireTx | None, current_tx_time: float) -> str:
+    """현재 TX와 직전 wire TX 사이의 종류·간격을 문자열로 반환한다."""
+    if previous is None:
+        return "previous_tx=none tx_gap_ms=none"
+    gap_ms = (current_tx_time - previous.timestamp) * 1000
+    return (
+        f"previous_tx={previous.command}/{previous.subcommand} "
+        f"previous_txn={previous.transaction_id} "
+        f"previous_attempt={previous.attempt} tx_gap_ms={gap_ms:.3f}"
+    )
+
+
 async def _read_response_with_timeout(reader: asyncio.StreamReader) -> bytes:
     """새 request를 보내지 않고 다음 완전한 response frame 하나를 읽는다."""
     config = get_serial_config()
@@ -302,9 +390,13 @@ async def fetch(
     Raises:
         SerialCommunicationError: 모든 retry 후에도 통신이 실패한 경우
     """
+    global _transaction_sequence, _last_wire_tx
+
     config = get_serial_config()
 
     async with _serial_mutex:
+        _transaction_sequence += 1
+        transaction_id = _transaction_sequence
         with PerformanceLogger(logger, "serial_fetch", port=config.port):
             reader, writer = await get_serial_connection()
 
@@ -316,11 +408,31 @@ async def fetch(
                 # exponential backoff retry 루프
                 retry_delay = config.initial_retry_delay
                 last_exception: Optional[Exception] = None
+                discarded_total = 0
 
                 for attempt in range(1, config.max_retries + 1):
+                    unexpected = 0
+                    tx_time: float | None = None
+                    previous_tx: _WireTx | None = None
                     try:
-                        logger.debug(f"Attempt {attempt}/{config.max_retries}")
+                        logger.debug(
+                            f"Transaction {transaction_id} attempt "
+                            f"{attempt}/{config.max_retries}"
+                        )
                         await _respect_wire_min_gap(message, min_send_interval)
+
+                        tx_time = asyncio.get_running_loop().time()
+                        previous_tx = _last_wire_tx
+                        tx_codes = _response_codes(message)
+                        tx_command = tx_codes[0] if tx_codes else "??"
+                        tx_subcommand = tx_codes[1] if tx_codes else "??"
+                        _last_wire_tx = _WireTx(
+                            transaction_id=transaction_id,
+                            attempt=attempt,
+                            command=tx_command,
+                            subcommand=tx_subcommand,
+                            timestamp=tx_time,
+                        )
                         response = await _fetch_with_timeout(reader, writer, message)
 
                         # 다른 logical command의 늦은 응답을 받았으면 현재
@@ -330,18 +442,27 @@ async def fetch(
                         if expected_command is not None and expected_subcommand is not None:
                             expected = (expected_command, expected_subcommand)
                             codes = _response_codes(response)
-                            unexpected = 0
                             while codes != expected:
                                 unexpected += 1
+                                discarded_total += 1
                                 got = (
                                     f"{codes[0]}/{codes[1]}" if codes is not None
                                     else "unreadable header"
                                 )
+                                rx_after_tx_ms = (
+                                    (asyncio.get_running_loop().time() - tx_time) * 1000
+                                    if tx_time is not None
+                                    else float("nan")
+                                )
                                 logger.warning(
                                     "Unexpected response CMD/SUBCMD: "
-                                    f"expected {expected_command}/{expected_subcommand}, "
-                                    f"got {got}. Discarding without resend "
-                                    f"({unexpected}/{config.max_retries})..."
+                                    f"txn={transaction_id} attempt={attempt}/{config.max_retries} "
+                                    f"expected={expected_command}/{expected_subcommand} "
+                                    f"got={got} discarded={unexpected}/{config.max_retries} "
+                                    f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
+                                    f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
+                                    f"{_frame_diagnostics(response)}. "
+                                    "Discarding without resend..."
                                 )
                                 if unexpected >= config.max_retries:
                                     raise ProtocolError(
@@ -358,14 +479,37 @@ async def fetch(
                                 response = await _read_response_with_timeout(reader)
                                 codes = _response_codes(response)
 
+                        if discarded_total:
+                            rx_after_tx_ms = (
+                                (asyncio.get_running_loop().time() - tx_time) * 1000
+                                if tx_time is not None
+                                else float("nan")
+                            )
+                            logger.warning(
+                                "Serial transaction recovered: "
+                                f"txn={transaction_id} attempt={attempt}/{config.max_retries} "
+                                f"expected={expected_command}/{expected_subcommand} "
+                                f"discarded_total={discarded_total} "
+                                f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
+                                f"{_frame_diagnostics(response)}"
+                            )
                         logger.debug(f"Fetch successful on attempt {attempt}")
                         return response
                         
                     except asyncio.TimeoutError as e:
                         last_exception = e
+                        elapsed_ms = (
+                            (asyncio.get_running_loop().time() - tx_time) * 1000
+                            if tx_time is not None
+                            else float("nan")
+                        )
                         logger.warning(
-                            f"Timeout on attempt {attempt}/{config.max_retries} "
-                            f"(will retry in {retry_delay:.3f}s)"
+                            "Serial response timeout: "
+                            f"txn={transaction_id} attempt={attempt}/{config.max_retries} "
+                            f"expected={expected_command}/{expected_subcommand} "
+                            f"elapsed_after_tx_ms={elapsed_ms:.3f} "
+                            f"discarded_on_attempt={unexpected} "
+                            f"retry_delay_s={retry_delay:.3f}"
                         )
 
                         if attempt < config.max_retries:
@@ -377,10 +521,19 @@ async def fetch(
 
                     except asyncio.IncompleteReadError as e:
                         last_exception = e
+                        elapsed_ms = (
+                            (asyncio.get_running_loop().time() - tx_time) * 1000
+                            if tx_time is not None
+                            else float("nan")
+                        )
                         logger.warning(
-                            f"Incomplete read on attempt {attempt}/{config.max_retries}: "
-                            f"expected={e.expected} received={len(e.partial)} "
-                            f"(will retry in {retry_delay:.3f}s)"
+                            "Incomplete serial read: "
+                            f"txn={transaction_id} attempt={attempt}/{config.max_retries} "
+                            f"expected={expected_command}/{expected_subcommand} "
+                            f"bytes_expected={e.expected} bytes_received={len(e.partial)} "
+                            f"partial_hex={e.partial.hex().upper()} "
+                            f"elapsed_after_tx_ms={elapsed_ms:.3f} "
+                            f"retry_delay_s={retry_delay:.3f}"
                         )
 
                         if attempt < config.max_retries:

@@ -1,6 +1,7 @@
 """Serial transaction ownership and wire retry regression tests."""
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 from core.config import SerialModel
@@ -20,10 +21,12 @@ class _Writer:
         return None
 
 
-def _frame(command: str, subcommand: str) -> bytes:
+def _frame(command: str, subcommand: str, data: bytes = b"") -> bytes:
     # fetch()의 transaction matching은 header만 가볍게 확인한다. 정식 frame
     # checksum 검증은 commands.parse_response()의 별도 책임이다.
-    return b"\x02" + command.encode() + subcommand.encode() + b"\x03\x00"
+    payload = command.encode() + subcommand.encode() + data + b"\x03"
+    checksum = serial_io._xor_checksum(payload)
+    return b"\x02" + payload + bytes([checksum])
 
 
 def _setup(monkeypatch, *, max_retries: int = 3, retry_delay: float = 0.01):
@@ -74,6 +77,60 @@ def test_unrelated_response_is_discarded_without_resend(monkeypatch):
     assert serial_io._response_codes(response) == ("RQ", "ID")
     assert sends == 1
     assert reads == 1
+
+
+def test_mismatch_log_contains_lossless_frame_and_wire_timing(monkeypatch, caplog):
+    reader, _ = _setup(monkeypatch)
+    wrong = _frame("RQ", "ID", b"CLOSEDLOCKED")
+    expected = _frame("RQ", "IW", b"+00000" * 10)
+
+    async def send_once(_reader, _writer, _message):
+        return wrong
+
+    async def read_expected(actual_reader):
+        assert actual_reader is reader
+        return expected
+
+    monkeypatch.setattr(serial_io, "_fetch_with_timeout", send_once)
+    monkeypatch.setattr(serial_io, "_read_response_with_timeout", read_expected)
+
+    caplog.set_level(logging.WARNING, logger=serial_io.logger.name)
+
+    async def run():
+        return await serial_io.fetch(
+            _frame("RQ", "IW"),
+            expected_command="RQ",
+            expected_subcommand="IW",
+        )
+
+    assert asyncio.run(run()) == expected
+    messages = [record.getMessage() for record in caplog.records]
+    mismatch = next(msg for msg in messages if msg.startswith("Unexpected response"))
+    recovered = next(msg for msg in messages if msg.startswith("Serial transaction recovered"))
+
+    assert "txn=1 attempt=1/3" in mismatch
+    assert "expected=RQ/IW got=RQ/ID" in mismatch
+    assert "rx_after_tx_ms=" in mismatch
+    assert "previous_tx=none tx_gap_ms=none" in mismatch
+    assert "rx_len=19" in mismatch
+    assert "rx_shape=known-response-size" in mismatch
+    assert "rx_checksum=valid" in mismatch
+    assert f"rx_hex={wrong.hex().upper()}" in mismatch
+    assert "discarded_total=1" in recovered
+    assert "rx_len=67" in recovered
+
+
+def test_frame_diagnostics_distinguishes_echo_and_corruption():
+    echo = _frame("RQ", "ID")
+    echo_diagnostics = serial_io._frame_diagnostics(echo)
+    assert "rx_len=7" in echo_diagnostics
+    assert "rx_shape=request-sized-or-empty-response" in echo_diagnostics
+    assert "rx_checksum=valid" in echo_diagnostics
+
+    corrupted = echo[:-1] + bytes([echo[-1] ^ 0xFF])
+    corrupted_diagnostics = serial_io._frame_diagnostics(corrupted)
+    assert "rx_checksum=invalid" in corrupted_diagnostics
+    assert f"rx_hex={corrupted.hex().upper()}" in corrupted_diagnostics
 
 
 def test_transaction_keeps_serial_ownership_while_waiting_for_match(monkeypatch):
