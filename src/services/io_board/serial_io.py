@@ -15,13 +15,17 @@ import serial_asyncio
 
 from core.config import SerialModel
 from core.logging_config import PerformanceLogger, get_logger, log_payload
-from exceptions import ErrorCode, SerialCommunicationError
+from exceptions import ErrorCode, ProtocolError, SerialCommunicationError
 
 logger = get_logger(__name__)
 
 # 전역 serial 설정과 mutex (포트 접근 직렬화)
 _serial_config: Optional[SerialModel] = None
 _serial_mutex = asyncio.Lock()
+# 실제 wire 전송 시각. 상위 API 호출 throttle만으로는 fetch() 내부 timeout
+# 재전송까지 제한할 수 없으므로 request 종류별 마지막 TX를 여기서
+# 추적한다.
+_last_request_tx: dict[bytes, float] = {}
 
 
 def configure_serial(config: SerialModel) -> None:
@@ -32,6 +36,7 @@ def configure_serial(config: SerialModel) -> None:
     """
     global _serial_config
     _serial_config = config
+    _last_request_tx.clear()
     logger.info(
         f"Serial configured: port={config.port} baudrate={config.baudrate} "
         f"timeouts=({config.header_timeout}s/{config.body_timeout}s/{config.checksum_timeout}s) "
@@ -214,7 +219,67 @@ async def _fetch_with_timeout(
     return response
 
 
-async def fetch(message: bytes) -> bytes:
+def _response_codes(response: bytes) -> tuple[str, str] | None:
+    """완전한 응답 frame의 CMD/SUBCMD를 가볍게 읽는다.
+
+    checksum을 포함한 정식 검증은 상위 protocol parser가 담당한다. 여기서는
+    이미 완전한 frame으로 읽은 응답이 현재 transaction의 것인지 판별해,
+    다른 명령의 지연 응답을 재전송 없이 폐기하는 용도로만 사용한다.
+    """
+    if len(response) < 5 or response[0:1] != b"\x02":
+        return None
+    try:
+        return response[1:3].decode("ascii"), response[3:5].decode("ascii")
+    except UnicodeDecodeError:
+        return None
+
+
+async def _read_response_with_timeout(reader: asyncio.StreamReader) -> bytes:
+    """새 request를 보내지 않고 다음 완전한 response frame 하나를 읽는다."""
+    config = get_serial_config()
+    response = b""
+    response += await asyncio.wait_for(
+        reader.readexactly(1), timeout=config.header_timeout
+    )
+    response += await asyncio.wait_for(
+        reader.readuntil(b"\x03"), timeout=config.body_timeout
+    )
+    response += await asyncio.wait_for(
+        reader.readexactly(1), timeout=config.checksum_timeout
+    )
+    log_payload(logger, "RX", response, "response")
+    return response
+
+
+async def _respect_wire_min_gap(message: bytes, min_send_interval: float) -> None:
+    """동일 request의 실제 serial TX 간 최소 간격을 강제한다.
+
+    특히 RQIW는 0.7초 미만 재전송 시 firmware가 부호를 손상시킨다. 이 함수는
+    timeout retry에도 호출되므로 get_loadcells() 바깥 throttle의 사각지대를
+    막는다. 호출부는 _serial_mutex를 보유하므로 별도 lock이 필요 없다.
+    """
+    if min_send_interval <= 0:
+        return
+    key = message[:5]
+    previous = _last_request_tx.get(key)
+    if previous is not None:
+        remaining = min_send_interval - (asyncio.get_running_loop().time() - previous)
+        if remaining > 0:
+            logger.warning(
+                f"Delaying {key[1:5].decode('ascii', errors='replace')} retry "
+                f"by {remaining:.3f}s to preserve wire min gap"
+            )
+            await asyncio.sleep(remaining)
+    _last_request_tx[key] = asyncio.get_running_loop().time()
+
+
+async def fetch(
+    message: bytes,
+    *,
+    expected_command: str | None = None,
+    expected_subcommand: str | None = None,
+    min_send_interval: float = 0.0,
+) -> bytes:
     """IO Board에 메시지를 전송하고 retry 로직과 함께 응답을 수신한다.
 
     다음을 포함한 안전한 serial 통신을 구현한다:
@@ -225,6 +290,11 @@ async def fetch(message: bytes) -> bytes:
 
     Args:
         message: 전송할 바이너리 protocol 메시지
+        expected_command: 기대 response CMD. subcommand와 함께 주어지면 다른
+            논리 명령의 지연 response를 재전송 없이 읽어서 버린다.
+        expected_subcommand: 기대 response SUBCMD.
+        min_send_interval: 동일 request의 실제 TX 간 최소 간격. 내부 retry에도
+            적용된다.
 
     Returns:
         디바이스의 바이너리 protocol 응답
@@ -250,7 +320,44 @@ async def fetch(message: bytes) -> bytes:
                 for attempt in range(1, config.max_retries + 1):
                     try:
                         logger.debug(f"Attempt {attempt}/{config.max_retries}")
+                        await _respect_wire_min_gap(message, min_send_interval)
                         response = await _fetch_with_timeout(reader, writer, message)
+
+                        # 다른 logical command의 늦은 응답을 받았으면 현재
+                        # 요청을 다시 보내지 않는다. 이미 보낸 요청의 응답이
+                        # 뒤이어 올 수 있으므로 같은 serial ownership 안에서
+                        # frame만 계속 읽는다.
+                        if expected_command is not None and expected_subcommand is not None:
+                            expected = (expected_command, expected_subcommand)
+                            codes = _response_codes(response)
+                            unexpected = 0
+                            while codes != expected:
+                                unexpected += 1
+                                got = (
+                                    f"{codes[0]}/{codes[1]}" if codes is not None
+                                    else "unreadable header"
+                                )
+                                logger.warning(
+                                    "Unexpected response CMD/SUBCMD: "
+                                    f"expected {expected_command}/{expected_subcommand}, "
+                                    f"got {got}. Discarding without resend "
+                                    f"({unexpected}/{config.max_retries})..."
+                                )
+                                if unexpected >= config.max_retries:
+                                    raise ProtocolError(
+                                        "Too many unrelated responses while waiting for "
+                                        f"{expected_command}/{expected_subcommand}",
+                                        ErrorCode.PROTOCOL_INVALID_RESPONSE,
+                                        {
+                                            "command": expected_command,
+                                            "subcommand": expected_subcommand,
+                                            "last_received": got,
+                                            "discarded": unexpected,
+                                        },
+                                    )
+                                response = await _read_response_with_timeout(reader)
+                                codes = _response_codes(response)
+
                         logger.debug(f"Fetch successful on attempt {attempt}")
                         return response
                         

@@ -1,5 +1,30 @@
 # IO Board Module - Changelog
 
+## Version 2.0.5 - Transaction-Safe Serial Recovery (2026-08-10)
+
+### 🐛 Fixes
+
+- Response matching now stays inside one serial transaction. A delayed
+  response for another command (for example, expected `RQ/ID` but received
+  `RQ/ER`) is discarded without immediately retransmitting the current
+  request; the transaction keeps ownership of the port while waiting for its
+  matching response. This prevents `ID/IW/ER` retry loops from interleaving
+  and continually exchanging responses.
+- The loadcell minimum request gap now applies at the actual wire TX boundary,
+  including timeout retries. Previously the `get_loadcells()` entry throttle
+  did not cover retransmissions inside `fetch()`, so recovery traffic could
+  send `RQ/IW` faster than the firmware's ~0.7s safe interval and re-trigger
+  sign corruption.
+- Added regression tests for unrelated-response draining without resend,
+  transaction ownership across concurrent commands, and RQ/IW wire spacing
+  during timeout retry.
+- `/health` is now read-only: it no longer clears the device error FIFO or
+  reissues a deadbolt command. Timestamp-free `RQER` history remains available
+  through `/errors` but is not treated as a current-fault snapshot.
+- Deadbolt control now holds an operation-level lock from MCDC through the
+  settle delay and RQID verification, preventing concurrent requests from
+  overwriting each other's target state.
+
 ## Version 2.0.4 - Median Filter Off by Default (2026-07-16)
 
 ### 🔧 Changes

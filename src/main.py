@@ -50,6 +50,10 @@ async def lifespan(app: FastAPI):
     """
 
     app.state.stop_event = stop_event
+    # MCDC 전송부터 settle 이후 RQID 확인까지 하나의 논리적 deadbolt
+    # operation으로 직렬화한다. 저수준 serial mutex는 frame 한 번의 왕복만
+    # 보호하므로 별도의 operation lock이 필요하다.
+    app.state.deadbolt_operation_lock = asyncio.Lock()
 
     settings = app.state.settings
 

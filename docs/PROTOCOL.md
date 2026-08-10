@@ -54,6 +54,21 @@ Sources: [src/io_board/protocol.py](src/io_board/protocol.py), [src/io_board/io_
 - LC01–LC10: loadcell comms failure or weight range exceeded per sensor.
 - Additional device codes may be vendor-specific; `0000` means no error.
 
+### Health-check policy for RQER
+- `RQER` is a timestamp-free FIFO history, not a snapshot of currently active
+  faults. Without first issuing the destructive `MCEZ`, it cannot distinguish
+  a stale recovered fault from a current fault.
+- `GET /health` therefore does not issue `RQER` or `MCEZ`. Current loadcell
+  health is derived from the current `RQIW` frame; current deadbolt health is
+  derived from `RQID` plus the tracked result of the most recent control
+  request.
+- Raw error history remains available through `GET /errors`. Clearing it is an
+  explicit operator action through `DELETE /errors`, never a health-check side
+  effect.
+- A future active diagnostic may use `MCEZ -> controlled action -> settle ->
+  RQID/RQER`, but must serialize with normal deadbolt operations and preserve
+  or report its diagnostic context.
+
 ### Reference Implementation Pointers
 - Frame schemas: Request/Response structs in [src/io_board/protocol.py](src/io_board/protocol.py).
 - Command enums and payload types: [src/io_board/io_types.py](src/io_board/io_types.py).
