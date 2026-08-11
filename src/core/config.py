@@ -31,7 +31,8 @@ class SerialModel(BaseModel):
         description="Header read timeout in seconds",
     )
     body_timeout: float = Field(
-        default=2.0,
+        # default=2.0,
+        default=0.3,
         description="Body read timeout in seconds",
     )
     checksum_timeout: float = Field(
