@@ -481,44 +481,96 @@ async def fetch(
                         if expected_command is not None and expected_subcommand is not None:
                             expected = (expected_command, expected_subcommand)
                             codes = _response_codes(response)
-                            while codes != expected:
-                                unexpected += 1
-                                discarded_total += 1
-                                got = (
-                                    f"{codes[0]}/{codes[1]}" if codes is not None
-                                    else "unreadable header"
-                                )
-                                rx_after_tx_ms = (
-                                    (asyncio.get_running_loop().time() - tx_time) * 1000
-                                    if tx_time is not None
-                                    else float("nan")
-                                )
-                                logger.warning(
-                                    "Unexpected response CMD/SUBCMD: "
-                                    f"txn={transaction_id} attempt={attempt}/{config.max_retries} "
-                                    f"expected={expected_command}/{expected_subcommand} "
-                                    f"got={got} discarded={unexpected}/{config.max_retries} "
-                                    f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
-                                    f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
-                                    f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
-                                    f"{_frame_diagnostics(response)}. "
-                                    "Discarding without resend..."
-                                )
-                                if unexpected >= config.max_retries:
-                                    raise ProtocolError(
-                                        "Too many unrelated responses while waiting for "
-                                        f"{expected_command}/{expected_subcommand}",
-                                        ErrorCode.PROTOCOL_INVALID_RESPONSE,
-                                        {
-                                            "command": expected_command,
-                                            "subcommand": expected_subcommand,
-                                            "last_received": got,
-                                            "discarded": unexpected,
-                                        },
-                                    )
-                                response = await _read_response_with_timeout(reader)
-                                _last_rx_complete_time = asyncio.get_running_loop().time()
-                                codes = _response_codes(response)
+                            # while codes != expected:
+                            #     unexpected += 1
+                            #     discarded_total += 1
+                            #     got = (
+                            #         f"{codes[0]}/{codes[1]}" if codes is not None
+                            #         else "unreadable header"
+                            #     )
+                            #     rx_after_tx_ms = (
+                            #         (asyncio.get_running_loop().time() - tx_time) * 1000
+                            #         if tx_time is not None
+                            #         else float("nan")
+                            #     )
+                            #     logger.warning(
+                            #         "Unexpected response CMD/SUBCMD: "
+                            #         f"txn={transaction_id} attempt={attempt}/{config.max_retries} "
+                            #         f"expected={expected_command}/{expected_subcommand} "
+                            #         f"got={got} discarded={unexpected}/{config.max_retries} "
+                            #         f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
+                            #         f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
+                            #         f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
+                            #         f"{_frame_diagnostics(response)}. "
+                            #         "Discarding without resend..."
+                            #     )
+                            #     if unexpected >= config.max_retries:
+                            #         raise ProtocolError(
+                            #             "Too many unrelated responses while waiting for "
+                            #             f"{expected_command}/{expected_subcommand}",
+                            #             ErrorCode.PROTOCOL_INVALID_RESPONSE,
+                            #             {
+                            #                 "command": expected_command,
+                            #                 "subcommand": expected_subcommand,
+                            #                 "last_received": got,
+                            #                 "discarded": unexpected,
+                            #             },
+                            #         )
+                            #     response = await _read_response_with_timeout(reader)
+                            #     _last_rx_complete_time = asyncio.get_running_loop().time()
+                            #     codes = _response_codes(response)
+
+                        if codes != expected:
+                            unexpected += 1
+                            discarded_total += 1
+                    
+                            got = (
+                                f"{codes[0]}/{codes[1]}"
+                                if codes is not None
+                                else "unreadable header"
+                            )
+                    
+                            rx_after_tx_ms = (
+                                (asyncio.get_running_loop().time() - tx_time) * 1000
+                                if tx_time is not None
+                                else float("nan")
+                            )
+                    
+                            logger.warning(
+                                "Unexpected response CMD/SUBCMD: "
+                                f"txn={transaction_id} "
+                                f"attempt={attempt}/{config.max_retries} "
+                                f"expected={expected_command}/{expected_subcommand} "
+                                f"got={got} "
+                                f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
+                                f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
+                                f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
+                                f"{_frame_diagnostics(response)}. "
+                                "Discarding mismatched response and retrying same request..."
+                            )
+                    
+                            # retry가 남아 있으면 동일 request를 다시 송신
+                            if attempt < config.max_retries:
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= config.retry_backoff_multiplier
+                    
+                                # 혹시 남아있는 stale byte가 있다면 재송신 전에 제거
+                                await _drain_stale_input(reader)
+                    
+                                continue
+                    
+                            # 모든 retry에서 mismatch가 발생한 경우에만 실패 처리
+                            raise ProtocolError(
+                                "Response CMD/SUBCMD mismatch after "
+                                f"{config.max_retries} attempts",
+                                ErrorCode.PROTOCOL_INVALID_RESPONSE,
+                                {
+                                    "command": expected_command,
+                                    "subcommand": expected_subcommand,
+                                    "last_received": got,
+                                    "attempts": config.max_retries,
+                                },
+                            )
 
                         if discarded_total:
                             rx_after_tx_ms = (
