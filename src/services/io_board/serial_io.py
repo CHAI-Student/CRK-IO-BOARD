@@ -362,7 +362,7 @@ async def _respect_wire_min_gap(message: bytes, min_send_interval: float) -> Non
                 f"by {remaining:.3f}s to preserve wire min gap"
             )
             await asyncio.sleep(remaining)
-    _last_request_tx[key] = asyncio.get_running_loop().time()
+    # _last_request_tx[key] = asyncio.get_running_loop().time()
 
 
 async def _respect_inter_command_gap(min_gap: float) -> None:
@@ -433,7 +433,7 @@ async def fetch(
             try:
                 # 이전 교환에서 남은 orphaned 바이트가 이번 응답과 뒤섞이지
                 # 않도록, 요청을 보내기 전에 buffer를 비운다
-                await _drain_stale_input(reader)
+                # await _drain_stale_input(reader)
 
                 # exponential backoff retry 루프
                 retry_delay = config.initial_retry_delay
@@ -453,9 +453,14 @@ async def fetch(
                         await _respect_inter_command_gap(config.inter_command_gap)
                         await _respect_wire_min_gap(message, min_send_interval)
 
+                        # 모든 timing wait가 끝난 뒤,
+                        # 실제 TX 직전에 늦게 도착한 stale response를 제거
+                        await _drain_stale_input(reader)
+
                         tx_time = asyncio.get_running_loop().time()
                         previous_tx = _last_wire_tx
                         previous_rx_time = _last_rx_complete_time
+                        _last_request_tx[message[:5]] = tx_time
                         tx_codes = _response_codes(message)
                         tx_command = tx_codes[0] if tx_codes else "??"
                         tx_subcommand = tx_codes[1] if tx_codes else "??"
@@ -553,7 +558,7 @@ async def fetch(
                             retry_delay *= config.retry_backoff_multiplier
                             # timeout된 요청의 응답이 뒤늦게 도착해 다음
                             # 재전송의 응답과 뒤섞이지 않도록 재전송 전에도 비운다
-                            await _drain_stale_input(reader)
+                            # await _drain_stale_input(reader)
 
                     except asyncio.IncompleteReadError as e:
                         last_exception = e
@@ -575,7 +580,7 @@ async def fetch(
                         if attempt < config.max_retries:
                             await asyncio.sleep(retry_delay)
                             retry_delay *= config.retry_backoff_multiplier
-                            await _drain_stale_input(reader)
+                            # await _drain_stale_input(reader)
                 
                 # 모든 retry 소진
                 if isinstance(last_exception, asyncio.TimeoutError):
