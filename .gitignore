@@ -175,3 +175,6 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 .DS_Store
+
+# Locally generated Word guides. Keep source documentation in Markdown.
+docs/CRK-IO-BOARD_기술연동가이드_*.docx

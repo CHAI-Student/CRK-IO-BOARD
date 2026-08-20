@@ -1,61 +1,49 @@
 # IO Board
 
-Embedded I/O control system with real-time Server-Sent Events (SSE) streaming, loadcell monitoring, and door control.
+CRK 장비의 로드셀, 문 센서와 데드볼트를 제어하는 FastAPI 서비스이다.
+REST API, 통합 SSE 스트림, 로드셀 기록과 시리얼 통신 복구를 제공한다.
 
-## Quick Links
-
-- **[Getting Started](docs/GETTING_STARTED.md)** - Installation, setup, and first use
-- **[API Documentation](docs/API.md)** - REST and SSE endpoint reference
-- **[Streaming Guide](docs/STREAMING.md)** - Server-Sent Events detailed specification and examples
-- **[Architecture](docs/ARCHITECTURE.md)** - System design and data flow
-- **[Protocol Reference](docs/PROTOCOL.md)** - Binary communication protocol
-- **[Operations Guide](docs/OPERATIONS.md)** - Configuration, deployment, and troubleshooting
-- **[Known Serial Response Issue](docs/KNOWN_RESPONSE_MISMATCH.md)** - Unresolved response mismatch, impact, and recommended hardware/firmware work
-- **[Changelog](CHANGELOG.md)** - Version history, features, and breaking changes
-
-## Documentation Structure
-
-```
-docs/
-├── GETTING_STARTED.md       # Start here
-├── API.md                   # REST endpoints
-├── STREAMING.md             # SSE streaming guide
-├── ARCHITECTURE.md          # System design
-├── PROTOCOL.md              # Binary protocol
-├── OPERATIONS.md            # Operations & config
-├── KNOWN_RESPONSE_MISMATCH.md # Unresolved serial response mismatch
-├── OVERVIEW.md              # Overview documentation
-└── advanced/
-    └── SSE_ARCHITECTURE.md  # Deep dive: SSE async flows
-
-guides/
-├── TESTING.md               # Testing setup and commands
-└── VERIFICATION_CHECKLIST.md # Quality assurance checklist
-
-reference/
-├── INDEX.md                 # Master documentation index
-└── SSE_DOCUMENTATION_INDEX.md # SSE docs index
-
-specs/                       # Hardware specifications (CSV/PDF)
-```
-
-## Features
-
-- Real-time loadcell streaming with configurable filtering
-- Door/deadbolt status monitoring
-- Exponential and Kalman filter implementations
-- Threshold-based change detection
-- Multiple data stream aggregation
-
-## Testing
-
-Run the test suite:
+## 시작
 
 ```bash
-pytest
+uv sync
+uv run src/main.py
 ```
 
-See [Testing Guide](guides/TESTING.md) for detailed instructions.
+기본 주소는 `http://localhost:8000`이다. 현재 API 요청·응답 규격은 실행 중인
+서비스의 Swagger UI(`/docs`)와 OpenAPI JSON(`/openapi.json`)을 기준으로 한다.
+
+환경 변수와 운영 설정은 [README.PROD.md](README.PROD.md)를 참고한다.
+
+## 문서
+
+- [API 사용법](docs/API.md)
+- [서비스 구조](docs/ARCHITECTURE.md)
+- [운영 및 장애 대응](docs/OPERATIONS.md)
+- [시리얼 프로토콜](docs/PROTOCOL.md)
+- [테스트 구성](docs/TESTS.md)
+- [미해결 시리얼 응답 불일치](docs/KNOWN_RESPONSE_MISMATCH.md)
+- [로드셀 부호 글리치 펌웨어 요청](docs/FIRMWARE_SIGN_GLITCH_REQUEST.md)
+- [로드셀 zero-tracking 펌웨어 요청](docs/FIRMWARE_ZERO_TRACKING_REQUEST.md)
+- [변경 이력](CHANGELOG.md)
+
+하드웨어 원본 사양은 `specs/`의 CSV와 PDF를 기준으로 한다.
+
+## 주요 기능
+
+- 로드셀 10채널 조회, 기록과 SSE 스트리밍
+- 문·데드볼트 상태 조회와 데드볼트 제어
+- exponential·Kalman filter와 threshold 변화 감지
+- 시리얼 timeout retry, 응답 유형 검증과 진단 로그
+- 환경 변수 기반 polling, sanitizer와 health 설정
+
+## 테스트
+
+```bash
+uv run pytest
+```
+
+각 파일의 검증 범위는 [docs/TESTS.md](docs/TESTS.md)를 참고한다.
 
 ## License
 

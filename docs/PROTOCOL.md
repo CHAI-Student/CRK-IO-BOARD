@@ -1,6 +1,6 @@
 ## Binary Protocol and Hardware Reference
 
-Sources: [src/io_board/protocol.py](src/io_board/protocol.py), [src/io_board/io_types.py](src/io_board/io_types.py), [specs/코맨드_요청_및_응답.csv](specs/%EC%BD%94%EB%A7%A8%EB%93%9C_%EC%9A%94%EC%B2%AD_%EB%B0%8F_%EC%9D%91%EB%8B%B5.csv), [specs/코맨드_종류.csv](specs/%EC%BD%94%EB%A7%A8%EB%93%9C_%EC%A2%85%EB%A5%98.csv), [specs/통신사양서.csv](specs/%ED%86%B5%EC%8B%A0%EC%82%AC%EC%96%91%EC%84%9C.csv).
+Sources: [protocol.py](../src/services/io_board/protocol.py), [io_types.py](../src/services/io_board/io_types.py), [코맨드 요청 및 응답](../specs/%EC%BD%94%EB%A7%A8%EB%93%9C_%EC%9A%94%EC%B2%AD_%EB%B0%8F_%EC%9D%91%EB%8B%B5.csv), [코맨드 종류](../specs/%EC%BD%94%EB%A7%A8%EB%93%9C_%EC%A2%85%EB%A5%98.csv), [통신사양서](../specs/%ED%86%B5%EC%8B%A0%EC%82%AC%EC%96%91%EC%84%9C.csv).
 
 ### Physical/Link Layer
 - Interface: RS-232C async, 38,400 bps, 8 data bits, no parity, 1 stop bit (8N1).
@@ -45,7 +45,7 @@ Sources: [src/io_board/protocol.py](src/io_board/protocol.py), [src/io_board/io_
 
 ### Mismatches/Notes
 - Code uses LRC term “checksum” as XOR; matches CSV.
-- OpenAPI file is absent; rely on this spec plus source.
+- REST/SSE schema는 실행 중인 서비스의 `/docs`와 `/openapi.json`을 기준으로 한다.
 - Loadcell value clamp/formatting for filters uses +/- five digits; aligns with hardware range.
 - A response mismatch remains unresolved: the board/serial path can return the
   previous command's complete, checksum-valid response (`RQ/IW` and `RQ/ID`
@@ -75,7 +75,7 @@ Sources: [src/io_board/protocol.py](src/io_board/protocol.py), [src/io_board/io_
   or report its diagnostic context.
 
 ### Reference Implementation Pointers
-- Frame schemas: Request/Response structs in [src/io_board/protocol.py](src/io_board/protocol.py).
-- Command enums and payload types: [src/io_board/io_types.py](src/io_board/io_types.py).
-- High-level command usage: [src/io_board/commands.py](src/io_board/commands.py).
-- Filtering/formatting of loadcells for downstream SSE: [src/io_board/events.py](src/io_board/events.py) and [src/io_board/filters.py](src/io_board/filters.py).
+- Frame schemas: Request/Response structs in [protocol.py](../src/services/io_board/protocol.py).
+- Command enums and payload types: [io_types.py](../src/services/io_board/io_types.py).
+- High-level command usage: [commands.py](../src/services/io_board/commands.py).
+- Filtering/formatting of loadcells for downstream SSE: [events.py](../src/io_board/events.py) and [filters.py](../src/io_board/filters.py).

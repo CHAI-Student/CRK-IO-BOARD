@@ -1,309 +1,108 @@
-# IO Board Architecture Diagram
+# 서비스 구조
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         IO Board Control Service                     │
-│                            Version 2.0.0                             │
-└─────────────────────────────────────────────────────────────────────┘
+IO Board 서비스는 FastAPI 요청을 고수준 command로 변환하고, binary protocol과
+단일 serial 연결을 통해 장비와 통신한다. SSE와 기록은 공통 polling 결과를
+구독해 불필요한 중복 요청을 줄인다.
 
-┌─────────────────────────────────────────────────────────────────────┐
-│                      External Dependencies                           │
-├─────────────────────────────────────────────────────────────────────┤
-│  • FastAPI (Web Framework)                                          │
-│  • Uvicorn (ASGI Server)                                            │
-│  • Pydantic (Data Validation)                                       │
-│  • PySerial + PySerial-Asyncio (Serial Communication)               │
-│  • Construct (Binary Protocol)                                      │
-└─────────────────────────────────────────────────────────────────────┘
-                                  ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                      Application Entry Point                         │
-├─────────────────────────────────────────────────────────────────────┤
-│  main.py                                                            │
-│  • Load configuration from environment                               │
-│  • Setup structured logging                                         │
-│  • Configure serial communication                                   │
-│  • Start FastAPI server                                             │
-└─────────────────────────────────────────────────────────────────────┘
-                                  ↓
-┌────────────────────────────┬────────────────────────────────────────┐
-│   Configuration Layer      │      Logging Layer                     │
-├────────────────────────────┼────────────────────────────────────────┤
-│  config.py                 │   logging_config.py                    │
-│  • SerialConfig            │   • Correlation ID tracking            │
-│  • APIConfig               │   • Structured logging                 │
-│  • Environment variables   │   • Performance metrics                │
-│  • Validation              │   • Binary payload logging             │
-└────────────────────────────┴────────────────────────────────────────┘
-                                  ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                         API Layer (REST)                             │
-├─────────────────────────────────────────────────────────────────────┤
-│  api.py - FastAPI Application                                       │
-│                                                                      │
-│  Middleware:                                                         │
-│  • Request/Response Logging                                         │
-│  • Correlation ID Management                                        │
-│                                                                      │
-│  Exception Handlers:                                                │
-│  • IOBoardError → Standard Error Response                           │
-│  • ValidationError → 422 Response                                   │
-│  • Generic Exception → 500 Response                                 │
-│                                                                      │
-│  Endpoints:                                                          │
-│  ┌──────────────────┬──────────────────┬─────────────────────────┐ │
-│  │ Device Mgmt      │ Door Control     │ Sensors & Info          │ │
-│  ├──────────────────┼──────────────────┼─────────────────────────┤ │
-│  │ POST /init       │ POST /deadbolt   │ GET /loadcells          │ │
-│  │ POST /calibrate  │                  │ GET /status             │ │
-│  │ POST /mfg_number │                  │ GET /product_info       │ │
-│  │ DELETE /errors   │                  │ GET /errors             │ │
-│  │ POST /reboot     │                  │ GET /stream/loadcells   │ │
-│  └──────────────────┴──────────────────┴─────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
-                                  ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                      Business Logic Layer                            │
-├─────────────────────────────────────────────────────────────────────┤
-│  commands.py - High-Level Device Commands                           │
-│                                                                      │
-│  Device Control:              Data Retrieval:                       │
-│  • initialize()               • get_product_info()                  │
-│  • set_door_state()           • get_loadcells()                     │
-│  • calibrate()                • get_io_status()                     │
-│  • set_manufacturing_number() • get_errors()                        │
-│  • clear_errors()                                                   │
-│  • reboot()                                                         │
-│                                                                      │
-│  Features:                                                           │
-│  • Comprehensive docstrings                                         │
-│  • Type hints                                                       │
-│  • Error handling and logging                                       │
-│  • Performance tracking                                             │
-└─────────────────────────────────────────────────────────────────────┘
-                                  ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                   Serial Communication Layer                         │
-├─────────────────────────────────────────────────────────────────────┤
-│  serial_io.py - Async Serial Communication                          │
-│                                                                      │
-│  Key Functions:                                                      │
-│  • configure_serial() - Set configuration                           │
-│  • fetch() - Send/receive with retry logic                          │
-│                                                                      │
-│  Features:                                                           │
-│  • Mutex-based exclusive access                                     │
-│  • Exponential backoff retry (configurable)                         │
-│  • Timeout handling (header/body/checksum)                          │
-│  • Binary payload logging (TX/RX)                                   │
-│  • Categorized error handling                                       │
-│  • Automatic connection management                                  │
-│                                                                      │
-│  Retry Strategy:                                                     │
-│  Attempt 1: Wait 100ms                                              │
-│  Attempt 2: Wait 200ms (exponential backoff)                        │
-│  Attempt 3: Wait 400ms                                              │
-│  Fail: Raise SerialCommunicationError with context                  │
-└─────────────────────────────────────────────────────────────────────┘
-                                  ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                       Protocol Layer                                 │
-├─────────────────────────────────────────────────────────────────────┤
-│  protocol.py - Binary Protocol Implementation                       │
-│                                                                      │
-│  Frame Structure:                                                    │
-│  [STX 0x02][CMD 2B][SUBCMD 2B][DATA VAR][ETX 0x03][CHECKSUM 1B]    │
-│                                                                      │
-│  Key Functions:                                                      │
-│  • build_request() - Encode request messages                        │
-│  • parse_response() - Decode response messages                      │
-│  • calculate_checksum() - XOR checksum                              │
-│                                                                      │
-│  Commands:                                                           │
-│  ┌────────────────────┬──────────────────────────────────────────┐ │
-│  │ Management (MC)    │ Request (RQ)                            │ │
-│  ├────────────────────┼──────────────────────────────────────────┤ │
-│  │ PD - Initialize    │ MI - Manufacturing Info                 │ │
-│  │ DC - Door Control  │ IW - Loadcell Weights (10 readings)    │ │
-│  │ LZ - Calibrate     │ ID - IO Status (door + deadbolt)       │ │
-│  │ WP - Write Product │ ER - Error List (4 error codes)        │ │
-│  │ EZ - Clear Errors  │                                         │ │
-│  │ RT - Reboot        │                                         │ │
-│  └────────────────────┴──────────────────────────────────────────┘ │
-│                                                                      │
-│  Error Handling:                                                     │
-│  • Checksum validation                                              │
-│  • Frame marker validation (STX/ETX)                                │
-│  • Specific error codes for each failure type                       │
-└─────────────────────────────────────────────────────────────────────┘
-                                  ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Hardware Interface                                │
-├─────────────────────────────────────────────────────────────────────┤
-│  Serial Port (RS-232/USB)                                           │
-│  • COM3 (Windows) or /dev/ttyUSB0 (Linux) - configurable           │
-│  • 38400 baud - configurable                                        │
-│  • 8N1 (8 data bits, no parity, 1 stop bit)                        │
-└─────────────────────────────────────────────────────────────────────┘
-                                  ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                      IO Board Device                                 │
-├─────────────────────────────────────────────────────────────────────┤
-│  • 10 Loadcells (weight sensors)                                    │
-│  • Door sensor                                                       │
-│  • Deadbolt sensor                                                   │
-│  • Door lock control                                                 │
-│  • Error logging                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+## 구성
 
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Cross-Cutting Concerns                            │
-├─────────────────────────────────────────────────────────────────────┤
-│  types.py - Type Definitions                                        │
-│  • Enums (CommandType, DoorState, ErrorCode)                        │
-│  • TypedDicts (Protocol structures)                                 │
-│  • Pydantic Models (API request/response)                           │
-│                                                                      │
-│  exceptions.py - Exception Hierarchy                                │
-│  • IOBoardError (base)                                              │
-│    ├─ ConfigurationError (E1xxx)                                    │
-│    ├─ SerialCommunicationError (E2xxx)                              │
-│    ├─ ProtocolError (E3xxx)                                         │
-│    ├─ ValidationError (E4xxx)                                       │
-│    └─ DeviceError (E5xxx)                                           │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│                         Data Flow Example                            │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  HTTP Request: POST /deadbolt {"state": "OPEN"}                     │
-│       ↓                                                              │
-│  [API Layer] Validate request, log with correlation ID              │
-│       ↓                                                              │
-│  [Commands Layer] set_door_state(DoorState.OPEN)                    │
-│       ↓                                                              │
-│  [Protocol Layer] build_request("MC", "DC", {"DOOR": ord("O")})     │
-│       ↓                                                              │
-│  [Serial Layer] fetch(message) with retry logic                     │
-│       ↓                                                              │
-│  [Hardware] Send: 02 4D 43 44 43 4F 03 0A (hex)                     │
-│       ↓                                                              │
-│  [Hardware] Recv: 02 4D 43 44 43 4F 03 0A (hex)                     │
-│       ↓                                                              │
-│  [Serial Layer] Return binary response                              │
-│       ↓                                                              │
-│  [Protocol Layer] parse_response(message)                           │
-│       ↓                                                              │
-│  [Commands Layer] Return DoorState.OPEN                             │
-│       ↓                                                              │
-│  [API Layer] Return {"state": "OPEN"}, log completion time          │
-│       ↓                                                              │
-│  HTTP Response: 200 OK {"state": "OPEN"}                            │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│                      Error Flow Example                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  Serial Timeout Occurs                                               │
-│       ↓                                                              │
-│  [Serial Layer] Retry 1: Wait 100ms → Fail                          │
-│       ↓                                                              │
-│  [Serial Layer] Retry 2: Wait 200ms → Fail                          │
-│       ↓                                                              │
-│  [Serial Layer] Retry 3: Wait 400ms → Fail                          │
-│       ↓                                                              │
-│  [Serial Layer] Raise SerialCommunicationError(                     │
-│                     error_code=ErrorCode.SERIAL_TIMEOUT,            │
-│                     details={"port": "COM3", "attempts": 3}         │
-│                 )                                                    │
-│       ↓                                                              │
-│  [Commands Layer] Log error, re-raise                               │
-│       ↓                                                              │
-│  [API Layer] Exception handler catches IOBoardError                 │
-│       ↓                                                              │
-│  [API Layer] Return JSONResponse(                                   │
-│                  status_code=500,                                   │
-│                  content={                                          │
-│                      "error_code": "E2005",                         │
-│                      "message": "Serial read timeout...",           │
-│                      "details": {"port": "COM3", ...}               │
-│                  }                                                  │
-│              )                                                       │
-│       ↓                                                              │
-│  HTTP Response: 500 Internal Server Error                           │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-
-Legend:
-━━━━━  Data flow
-──────  Component boundary
-│      Vertical connection
+```text
+Client
+  ├─ REST ───────────────> API router ─────────────> IO Board commands
+  └─ SSE / Recording ────> Polling subscriber ─────> IO Board commands
+                                                    │
+                     Filter / Event detector <──────┤
+                                                    v
+                                  Sanitizer → Protocol → Serial → Device
 ```
 
-## Key Architecture Principles
+| 영역 | 경로 | 책임 |
+|---|---|---|
+| 진입점 | `src/main.py` | 설정, lifespan, middleware, router, graceful shutdown |
+| API | `src/api/v1/routers/` | management, machine, recording, SSE endpoint |
+| 설정·로그 | `src/core/` | 환경변수 검증, 구조화 로그, UTC 변환 |
+| command | `src/services/io_board/commands.py` | 장비 동작 단위와 loadcell throttle |
+| protocol | `src/services/io_board/protocol.py` | frame 생성, checksum 및 응답 parsing |
+| serial | `src/services/io_board/serial_io.py` | 연결 재사용, mutex, timeout, retry와 응답 matching |
+| 보정 | `src/services/io_board/sanitizer.py` | 부호 글리치 보정과 5g 양자화 |
+| polling | `src/services/polling/` | loadcell·IO status 수집과 subscriber broadcast |
+| SSE 처리 | `src/io_board/filters.py`, `events.py` | EMA/Kalman filter, threshold와 uncertainty 감지 |
+| 기록·health 상태 | `src/services/recording.py`, `error_state_mgmt.py` | 메모리 기록, door/deadbolt 상태 추적 |
 
-1. **Layered Architecture**: Clear separation of concerns
-2. **Dependency Inversion**: High-level modules don't depend on low-level details
-3. **Single Responsibility**: Each module has one clear purpose
-4. **Open/Closed**: Open for extension, closed for modification
-5. **Error Handling**: Comprehensive at every layer
-6. **Type Safety**: Strong typing throughout
-7. **Observability**: Logging and metrics at every layer
-8. **Configuration**: Externalized and validated
+## 시작과 종료
 
-## Component Responsibilities
+`src/main.py`의 lifespan은 다음 순서로 서비스를 구성한다.
 
-- **main.py**: Bootstrap and configuration
-- **config.py**: Configuration management
-- **logging_config.py**: Observability infrastructure
-- **api.py**: HTTP interface
-- **commands.py**: Business logic
-- **serial_io.py**: Hardware communication
-- **protocol.py**: Binary protocol handling
-- **types.py**: Type system
-- **exceptions.py**: Error handling
+1. 설정을 읽고 logging, serial, sanitizer와 loadcell throttle을 구성한다.
+2. loadcell과 IO status polling service를 시작한다.
+3. recording service와 health용 error-state service를 시작한다.
+4. 종료 시 recording subscriber를 먼저 정리하고 polling service를 중지한다.
+5. uvicorn shutdown 시 공유 stop event를 설정해 SSE generator를 종료한다.
 
-## Data Flow Summary
+PollingService는 subscriber가 있을 때만 장비를 polling한다. IO status는 health
+상태 추적 service가 상시 구독한다. loadcell은 SSE 또는 recording이 구독할
+때 활성화되며, 일반 REST 조회는 command를 직접 호출한다.
 
-```
-HTTP Request
-    ↓
-API Validation
-    ↓
-Business Logic
-    ↓
-Protocol Encoding
-    ↓
-Serial Communication
-    ↓
-Hardware
-    ↓
-Serial Response
-    ↓
-Protocol Decoding
-    ↓
-Business Logic
-    ↓
-API Response
-    ↓
-HTTP Response
+## REST 데이터 흐름
+
+```text
+HTTP request
+  → correlation ID middleware
+  → router validation
+  → commands
+  → protocol.build_request
+  → serial.fetch
+  → protocol.parse_response
+  → response model
 ```
 
-## Error Propagation
+Serial layer는 하나의 mutex로 transaction 전체를 보호한다. timing gate가 끝난
+실제 TX 직전에 stale input을 비운다. 관련 없는 CMD/SUBCMD 응답은 폐기하고
+exponential backoff 후 동일 요청을 다시 전송하며, 설정된 횟수만큼 반복해도
+일치하지 않으면 protocol 오류로 처리한다. 완전한 RX 이후 inter-command gap과
+동일 request의 최소 TX 간격도 적용한다.
 
+Loadcell 조회에는 모든 caller가 공유하는 gate가 있다. 설정된 최소 간격보다
+빠른 호출은 마지막 sanitize 결과를 반환한다. 새 frame에는 부호 글리치 보정과
+설정된 양자화가 적용되므로 REST, SSE와 recording이 같은 값을 사용한다.
+
+## SSE 및 기록 흐름
+
+```text
+PollingService
+  ├─ SSE StreamQueue → filter → change detector → SSE event
+  ├─ Recording StreamQueue → in-memory log
+  └─ ErrorState StreamQueue → door/deadbolt health state
 ```
-Hardware Error
-    ↓
-Serial Exception
-    ↓
-Protocol Exception (if applicable)
-    ↓
-Command Exception
-    ↓
-API Exception Handler
-    ↓
-Standard Error Response
-```
+
+각 subscriber는 독립된 `StreamQueue`를 가진다. polling 성공 결과는 data와
+timestamp로 전달되고, 실패 결과는 queue 소비 시 원래 예외로 다시 발생한다.
+
+SSE client별 filter와 threshold 상태는 서로 공유하지 않는다. loadcell과 door를
+동시에 요청하면 두 polling queue에서 받은 event를 하나의 SSE queue로
+multiplexing한다. 자세한 event 규격은 [API.md](API.md)를 참고한다.
+
+Recording은 loadcell polling을 구독해 process memory에 저장한다. 영속 저장소는
+사용하지 않는다.
+
+## Health 판정
+
+`GET /health`는 상태를 변경하지 않는 read-only probe이다.
+
+- loadcell: 10개 값의 형식과 설정된 정상 범위를 확인한다.
+- door: 마지막 닫힘 이후 열린 상태가 허용 시간을 넘었는지 확인한다.
+- deadbolt: 최근 제어 목표가 제한 시간 안에 반영됐는지와 현재 IO 상태를 확인한다.
+
+과거 장비 오류 FIFO를 지우거나 초기화·제어 명령을 보내지 않는다. deadbolt
+제어는 command 전송부터 0.5초 settle 및 상태 재확인까지 별도 operation lock으로
+직렬화한다.
+
+## 오류와 관측
+
+모든 HTTP request에 correlation ID가 부여되며 응답의
+`X-Correlation-ID`에도 포함된다. 장비 관련 예외는 표준 error response로
+변환한다. serial DEBUG 로그에는 TX/RX hex, transaction과 응답 mismatch 진단이
+남는다.
+
+Protocol 상세는 [PROTOCOL.md](PROTOCOL.md), 운영 절차는
+[OPERATIONS.md](OPERATIONS.md)를 참고한다.

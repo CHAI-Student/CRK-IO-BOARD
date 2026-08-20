@@ -41,20 +41,20 @@ IO 보드와의 시리얼 통신에 관한 설정입니다.
 | `IO_BOARD__SERIAL__PORT` | `/dev/ttyUSB0` (Linux) / `COM3` (Windows) | 연결할 시리얼 포트 경로 |
 | `IO_BOARD__SERIAL__BAUDRATE` | `38400` | 통신 보레이트 (양수만 허용) |
 | `IO_BOARD__SERIAL__HEADER_TIMEOUT` | `0.5` | 헤더 읽기 타임아웃 (초, 양수만 허용) |
-| `IO_BOARD__SERIAL__BODY_TIMEOUT` | `2.0` | 본문 읽기 타임아웃 (초, 양수만 허용) |
+| `IO_BOARD__SERIAL__BODY_TIMEOUT` | `0.3` | 본문 읽기 타임아웃 (초, 양수만 허용) |
 | `IO_BOARD__SERIAL__CHECKSUM_TIMEOUT` | `0.5` | 체크섬 읽기 타임아웃 (초, 양수만 허용) |
 | `IO_BOARD__SERIAL__MAX_RETRIES` | `3` | 명령 재시도 최대 횟수 (1 이상) |
 | `IO_BOARD__SERIAL__INITIAL_RETRY_DELAY` | `0.1` | 초기 재시도 대기 시간 (초, 양수만 허용) |
 | `IO_BOARD__SERIAL__RETRY_BACKOFF_MULTIPLIER` | `2.0` | 재시도 시 대기 시간 증가 배율 (1.0 이상) |
-| `IO_BOARD__SERIAL__INTER_COMMAND_GAP` | `0.0` | 완전한 응답 수신 후 다음 실제 시리얼 송신까지의 최소 간격(초). `0`이면 명시적 gate 비활성 |
+| `IO_BOARD__SERIAL__INTER_COMMAND_GAP` | `0.1` | 완전한 응답 수신 후 다음 실제 시리얼 송신까지의 최소 간격(초). `0`이면 명시적 gate 비활성 |
 
 펌웨어가 서로 다른 명령을 연속 처리할 때 이전 응답을 재생하는지 검증하려면
 아래처럼 값을 바꿔 A/B 테스트합니다. 이 설정은 `/loadcells`뿐 아니라 SSE,
 health, recording과 내부 retry를 포함한 모든 실제 wire TX에 적용됩니다.
 
 ```bash
-IO_BOARD__SERIAL__INTER_COMMAND_GAP=0.1 uv run src/main.py
-# 재현되면 0.2, 0.5 등으로 올려 비교
+IO_BOARD__SERIAL__INTER_COMMAND_GAP=0.2 uv run src/main.py
+# 재현되면 0.5 등으로 올려 비교
 ```
 
 시작 로그의 `inter_command_gap=...`으로 적용 여부를 확인할 수 있고,
