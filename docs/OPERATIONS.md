@@ -104,6 +104,55 @@ loadcell polling 주기 `0.8s`와 최소 요청 간격 `0.75s`를 임의로 낮�
 
 Sanitizer는 host-side 완화책이며 firmware 원인 해결을 대체하지 않는다.
 
+## 기기 이동 후 점검
+
+[`tools/post_move_diag.py`](../tools/post_move_diag.py)는 현재 sanitizer와 throttle을
+유지한 채 외부 API에서 관측되는 이동 후 이상을 점검한다. 자동 calibration,
+오류 삭제 또는 deadbolt 제어는 수행하지 않는다.
+
+가능하면 이동 전에 같은 적재 상태에서 baseline을 저장한다.
+
+```bash
+uv run tools/post_move_diag.py baseline \
+  -o before_move.json \
+  --expect-door CLOSED \
+  --expect-deadbolt LOCKED
+```
+
+이동·설치 후 장비를 수평으로 고정하고 흔들림이 멈춘 뒤 비교한다.
+
+```bash
+uv run tools/post_move_diag.py check \
+  --baseline before_move.json \
+  --expect-door CLOSED \
+  --expect-deadbolt LOCKED \
+  --report after_move.json
+```
+
+선반을 완전히 비운 상태라면 `--empty`를 추가해 채널 영점 편차도 판정한다.
+적재물이 있는 상태에서 `--empty`를 사용하면 정상 하중을 영점 오류로 판단하므로
+사용하지 않는다.
+
+도구가 점검하는 항목은 다음과 같다.
+
+- API 연결 실패와 응답 지연
+- `/health`의 loadcell·door·deadbolt 판정
+- `EEEEEE`, `VVVVVV`, 잘못된 loadcell 형식과 간헐 발생률
+- 정지 상태의 채널 표준편차와 범위
+- 빈 선반의 영점 편차
+- baseline 대비 제조번호, firmware, 평균 offset과 noise 변화
+- door·deadbolt의 예상 상태 불일치와 점검 중 상태 변화
+- 삭제하지 않은 장비 오류 FIFO
+
+기본 수집 간격은 throttle cache를 피하기 위해 `0.85s`이다. 결과는 JSON에
+저장되며 종료 코드는 `PASS=0`, `WARN=1`, `FAIL=2`이다. 판정 임계값은 CLI
+option으로 조정할 수 있다.
+
+이 값은 sanitizer·throttle 적용 이후 값이므로 firmware raw 진단을 대신하지
+않는다. 또한 안정된 고정값만으로 센서 감도 저하나 완전 고착을 확정할 수 없다.
+자동 점검 후 각 선반에 알려진 분동을 순서대로 올렸다 제거해 해당 채널의 반응과
+원점 복귀를 반드시 확인한다.
+
 ## SSE 운영
 
 ```bash

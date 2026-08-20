@@ -1,7 +1,7 @@
 # 테스트 구성
 
 `tests/`는 임시 예제가 아니라 IO Board의 통신·보정·동시성 동작을 보호하는 회귀 테스트다.
-전체 테스트는 하드웨어 없이 실행되며, 현재 7개 파일에 87개 항목이 있다.
+전체 테스트는 하드웨어 없이 실행되며, 현재 8개 파일에 96개 항목이 있다.
 
 ## 실행
 
@@ -45,6 +45,17 @@ IO Board 바이너리 프로토콜의 생성과 파싱을 검증한다.
 - checksum 불일치, STX/ETX 누락과 잘린 frame의 오류 처리
 - 요청과 응답의 round-trip
 
+### `test_post_move_diag.py` - 8개
+
+기기 이동 후 read-only 진단 도구의 판정 로직을 검증한다.
+
+- 정상 판독 형식, 오류 marker와 잘못된 값 parsing
+- 정상 장비의 PASS 판정
+- 통신 오류, 영점 편차와 불안정 채널 감지
+- baseline 대비 장비 identity와 채널 평균 변화 감지
+- health, door와 deadbolt 예상 상태 판정
+- throttle보다 짧은 수집 간격, 오류 이력, API 실패와 지연 감지
+
 ### `test_sanitizer_standalone.py` - 18개
 
 로드셀 펌웨어 이상을 보정하는 sanitizer를 검증한다.
@@ -55,14 +66,15 @@ IO Board 바이너리 프로토콜의 생성과 파싱을 검증한다.
 - median filter의 지연 특성
 - 5g 양자화, half-up rounding과 경계 hysteresis
 
-### `test_serial_transaction_standalone.py` - 7개
+### `test_serial_transaction_standalone.py` - 8개
 
 시리얼 응답 불일치와 동시 요청의 회귀를 검증한다.
 
-- 직전 명령의 응답을 폐기한 뒤 재전송 없이 예상 응답 대기
+- 다른 명령의 응답을 폐기한 뒤 동일 요청 재전송
 - mismatch 로그의 전체 frame과 wire timing 보존
 - request echo와 checksum 손상 frame 진단
-- 응답 대기 중 serial transaction 소유권 유지
+- mismatch 재시도 중 serial transaction 소유권 유지
+- expected code를 생략한 일반 fetch 경로
 - timeout retry에도 RQ/IW 최소 전송 간격 적용
 - complete RX 이후 inter-command gap 적용
 

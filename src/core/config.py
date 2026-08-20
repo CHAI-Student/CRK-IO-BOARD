@@ -31,7 +31,6 @@ class SerialModel(BaseModel):
         description="Header read timeout in seconds",
     )
     body_timeout: float = Field(
-        # default=2.0,
         default=0.3,
         description="Body read timeout in seconds",
     )
@@ -52,7 +51,6 @@ class SerialModel(BaseModel):
         description="Retry backoff multiplier",
     )
     inter_command_gap: float = Field(
-        # default=0.0,
         default=0.1,
         description="Minimum quiet time from a complete RX frame to the next "
         "wire TX in seconds; 0 disables the explicit gate",

@@ -25,9 +25,8 @@ as resolved by the host-side recovery logic.
 
 ## Operational impact
 
-- A mismatch is discarded and the expected response is awaited. In current
-  captures no matching response follows, so the first attempt reaches the
-  0.5-second header timeout and succeeds only after retry.
+- A mismatch is discarded and the same request is retried with exponential
+  backoff while the transaction retains serial ownership.
 - A card-terminal authorization can therefore appear successful upstream while
   the subsequent deadbolt command or `RQ/ID` verification is delayed or fails.
   This is a **leading suspected cause**, not yet a proven sole cause, of cases
@@ -41,8 +40,8 @@ as resolved by the host-side recovery logic.
 ## Host-side mitigations already implemented
 
 - A single serial mutex owns the complete request/response transaction.
-- An unexpected CMD/SUBCMD frame is logged and discarded without immediately
-  retransmitting; the transaction retains ownership while awaiting its match.
+- An unexpected CMD/SUBCMD frame is logged and discarded; the same request is
+  retried with exponential backoff while the transaction retains ownership.
 - Timeout retry and stale-input draining are instrumented.
 - `RQ/IW` wire transmissions are limited to a minimum 0.75-second interval.
 - `/health` is read-only and no longer issues deadbolt control or error-clear
@@ -52,7 +51,7 @@ as resolved by the host-side recovery logic.
 - Logs include transaction IDs, prior TX type, TX-to-TX and RX-to-TX gaps,
   complete frame hex, shape, length, and checksum validity.
 - `IO_BOARD__SERIAL__INTER_COMMAND_GAP` can enforce a diagnostic RX-to-next-TX
-  quiet interval. It defaults to `0` and is not a root-cause fix.
+  quiet interval. It defaults to `0.1` seconds and is not a root-cause fix.
 
 ## Timing experiment (2026-08-10)
 
@@ -66,9 +65,9 @@ With a raw loadcell SSE subscriber active:
 
 Both mismatches in the 0.5-second run occurred with a measured
 `rx_to_tx_gap_ms=500.000`. The delay is therefore an effective rate-reduction
-experiment, but not a reliable production solution. Each captured mismatch
-caused the timeout; the timeout occurred after the wrong response and does not
-explain the lower mismatch rate.
+experiment, but not a reliable production solution. At the time of this
+experiment, each captured mismatch caused a timeout before the host recovery
+policy was changed to retry the same request immediately after backoff.
 
 ## Recommended root-cause correction
 
@@ -104,4 +103,3 @@ The most useful fields are `expected`, `got`, `previous_tx`, `tx_gap_ms`,
 `rx_to_tx_gap_ms`, `rx_checksum`, and `rx_hex`. Preserve the surrounding logs
 and attach them to issue #3. Do not hide the problem by increasing timeouts:
 that only delays recovery and card/deadbolt feedback.
-

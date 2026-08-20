@@ -263,7 +263,7 @@ def _response_codes(response: bytes) -> tuple[str, str] | None:
 
     checksum을 포함한 정식 검증은 상위 protocol parser가 담당한다. 여기서는
     이미 완전한 frame으로 읽은 응답이 현재 transaction의 것인지 판별해,
-    다른 명령의 지연 응답을 재전송 없이 폐기하는 용도로만 사용한다.
+    mismatch 시 동일 요청을 재전송할지 결정하는 용도로만 사용한다.
     """
     if len(response) < 5 or response[0:1] != b"\x02":
         return None
@@ -326,23 +326,6 @@ def _tx_gap_diagnostics(previous: _WireTx | None, current_tx_time: float) -> str
     )
 
 
-async def _read_response_with_timeout(reader: asyncio.StreamReader) -> bytes:
-    """새 request를 보내지 않고 다음 완전한 response frame 하나를 읽는다."""
-    config = get_serial_config()
-    response = b""
-    response += await asyncio.wait_for(
-        reader.readexactly(1), timeout=config.header_timeout
-    )
-    response += await asyncio.wait_for(
-        reader.readuntil(b"\x03"), timeout=config.body_timeout
-    )
-    response += await asyncio.wait_for(
-        reader.readexactly(1), timeout=config.checksum_timeout
-    )
-    log_payload(logger, "RX", response, "response")
-    return response
-
-
 async def _respect_wire_min_gap(message: bytes, min_send_interval: float) -> None:
     """동일 request의 실제 serial TX 간 최소 간격을 강제한다.
 
@@ -362,9 +345,6 @@ async def _respect_wire_min_gap(message: bytes, min_send_interval: float) -> Non
                 f"by {remaining:.3f}s to preserve wire min gap"
             )
             await asyncio.sleep(remaining)
-    # _last_request_tx[key] = asyncio.get_running_loop().time()
-
-
 async def _respect_inter_command_gap(min_gap: float) -> None:
     """완전한 RX frame과 다음 wire TX 사이의 전역 최소 간격을 강제한다.
 
@@ -409,7 +389,7 @@ async def fetch(
     Args:
         message: 전송할 바이너리 protocol 메시지
         expected_command: 기대 response CMD. subcommand와 함께 주어지면 다른
-            논리 명령의 지연 response를 재전송 없이 읽어서 버린다.
+            응답을 폐기하고 exponential backoff 후 동일 요청을 재전송한다.
         expected_subcommand: 기대 response SUBCMD.
         min_send_interval: 동일 request의 실제 TX 간 최소 간격. 내부 retry에도
             적용된다.
@@ -431,10 +411,6 @@ async def fetch(
             reader, writer = await get_serial_connection()
 
             try:
-                # 이전 교환에서 남은 orphaned 바이트가 이번 응답과 뒤섞이지
-                # 않도록, 요청을 보내기 전에 buffer를 비운다
-                # await _drain_stale_input(reader)
-
                 # exponential backoff retry 루프
                 retry_delay = config.initial_retry_delay
                 last_exception: Optional[Exception] = None
@@ -474,103 +450,54 @@ async def fetch(
                         response = await _fetch_with_timeout(reader, writer, message)
                         _last_rx_complete_time = asyncio.get_running_loop().time()
 
-                        # 다른 logical command의 늦은 응답을 받았으면 현재
-                        # 요청을 다시 보내지 않는다. 이미 보낸 요청의 응답이
-                        # 뒤이어 올 수 있으므로 같은 serial ownership 안에서
-                        # frame만 계속 읽는다.
+                        # 다른 logical command의 응답이면 폐기하고 같은 serial
+                        # ownership을 유지한 채 동일 요청을 재전송한다.
                         if expected_command is not None and expected_subcommand is not None:
                             expected = (expected_command, expected_subcommand)
                             codes = _response_codes(response)
-                            # while codes != expected:
-                            #     unexpected += 1
-                            #     discarded_total += 1
-                            #     got = (
-                            #         f"{codes[0]}/{codes[1]}" if codes is not None
-                            #         else "unreadable header"
-                            #     )
-                            #     rx_after_tx_ms = (
-                            #         (asyncio.get_running_loop().time() - tx_time) * 1000
-                            #         if tx_time is not None
-                            #         else float("nan")
-                            #     )
-                            #     logger.warning(
-                            #         "Unexpected response CMD/SUBCMD: "
-                            #         f"txn={transaction_id} attempt={attempt}/{config.max_retries} "
-                            #         f"expected={expected_command}/{expected_subcommand} "
-                            #         f"got={got} discarded={unexpected}/{config.max_retries} "
-                            #         f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
-                            #         f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
-                            #         f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
-                            #         f"{_frame_diagnostics(response)}. "
-                            #         "Discarding without resend..."
-                            #     )
-                            #     if unexpected >= config.max_retries:
-                            #         raise ProtocolError(
-                            #             "Too many unrelated responses while waiting for "
-                            #             f"{expected_command}/{expected_subcommand}",
-                            #             ErrorCode.PROTOCOL_INVALID_RESPONSE,
-                            #             {
-                            #                 "command": expected_command,
-                            #                 "subcommand": expected_subcommand,
-                            #                 "last_received": got,
-                            #                 "discarded": unexpected,
-                            #             },
-                            #         )
-                            #     response = await _read_response_with_timeout(reader)
-                            #     _last_rx_complete_time = asyncio.get_running_loop().time()
-                            #     codes = _response_codes(response)
+                            if codes != expected:
+                                unexpected += 1
+                                discarded_total += 1
 
-                        if codes != expected:
-                            unexpected += 1
-                            discarded_total += 1
-                    
-                            got = (
-                                f"{codes[0]}/{codes[1]}"
-                                if codes is not None
-                                else "unreadable header"
-                            )
-                    
-                            rx_after_tx_ms = (
-                                (asyncio.get_running_loop().time() - tx_time) * 1000
-                                if tx_time is not None
-                                else float("nan")
-                            )
-                    
-                            logger.warning(
-                                "Unexpected response CMD/SUBCMD: "
-                                f"txn={transaction_id} "
-                                f"attempt={attempt}/{config.max_retries} "
-                                f"expected={expected_command}/{expected_subcommand} "
-                                f"got={got} "
-                                f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
-                                f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
-                                f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
-                                f"{_frame_diagnostics(response)}. "
-                                "Discarding mismatched response and retrying same request..."
-                            )
-                    
-                            # retry가 남아 있으면 동일 request를 다시 송신
-                            if attempt < config.max_retries:
-                                await asyncio.sleep(retry_delay)
-                                retry_delay *= config.retry_backoff_multiplier
-                    
-                                # 혹시 남아있는 stale byte가 있다면 재송신 전에 제거
-                                await _drain_stale_input(reader)
-                    
-                                continue
-                    
-                            # 모든 retry에서 mismatch가 발생한 경우에만 실패 처리
-                            raise ProtocolError(
-                                "Response CMD/SUBCMD mismatch after "
-                                f"{config.max_retries} attempts",
-                                ErrorCode.PROTOCOL_INVALID_RESPONSE,
-                                {
-                                    "command": expected_command,
-                                    "subcommand": expected_subcommand,
-                                    "last_received": got,
-                                    "attempts": config.max_retries,
-                                },
-                            )
+                                got = (
+                                    f"{codes[0]}/{codes[1]}"
+                                    if codes is not None
+                                    else "unreadable header"
+                                )
+                                rx_after_tx_ms = (
+                                    (asyncio.get_running_loop().time() - tx_time) * 1000
+                                    if tx_time is not None
+                                    else float("nan")
+                                )
+                                logger.warning(
+                                    "Unexpected response CMD/SUBCMD: "
+                                    f"txn={transaction_id} "
+                                    f"attempt={attempt}/{config.max_retries} "
+                                    f"expected={expected_command}/{expected_subcommand} "
+                                    f"got={got} "
+                                    f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
+                                    f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
+                                    f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
+                                    f"{_frame_diagnostics(response)}. "
+                                    "Discarding mismatched response and retrying same request..."
+                                )
+
+                                if attempt < config.max_retries:
+                                    await asyncio.sleep(retry_delay)
+                                    retry_delay *= config.retry_backoff_multiplier
+                                    continue
+
+                                raise ProtocolError(
+                                    "Response CMD/SUBCMD mismatch after "
+                                    f"{config.max_retries} attempts",
+                                    ErrorCode.PROTOCOL_INVALID_RESPONSE,
+                                    {
+                                        "command": expected_command,
+                                        "subcommand": expected_subcommand,
+                                        "last_received": got,
+                                        "attempts": config.max_retries,
+                                    },
+                                )
 
                         if discarded_total:
                             rx_after_tx_ms = (
@@ -588,7 +515,7 @@ async def fetch(
                             )
                         logger.debug(f"Fetch successful on attempt {attempt}")
                         return response
-                        
+
                     except asyncio.TimeoutError as e:
                         last_exception = e
                         elapsed_ms = (
@@ -608,9 +535,6 @@ async def fetch(
                         if attempt < config.max_retries:
                             await asyncio.sleep(retry_delay)
                             retry_delay *= config.retry_backoff_multiplier
-                            # timeout된 요청의 응답이 뒤늦게 도착해 다음
-                            # 재전송의 응답과 뒤섞이지 않도록 재전송 전에도 비운다
-                            # await _drain_stale_input(reader)
 
                     except asyncio.IncompleteReadError as e:
                         last_exception = e
@@ -632,8 +556,7 @@ async def fetch(
                         if attempt < config.max_retries:
                             await asyncio.sleep(retry_delay)
                             retry_delay *= config.retry_backoff_multiplier
-                            # await _drain_stale_input(reader)
-                
+
                 # 모든 retry 소진
                 if isinstance(last_exception, asyncio.TimeoutError):
                     raise SerialCommunicationError(
@@ -655,7 +578,7 @@ async def fetch(
                             "message_hex": message.hex()
                         }
                     ) from last_exception
-            
+
             except Exception as e:
                 # 예기치 못한 에러 시 연결을 reset한다. 정상 경로에서는
                 # 연결을 닫지 않고 다음 요청에서 재사용한다.

@@ -62,12 +62,12 @@ class TestSerialModel:
         assert config.port == DEFAULT_SERIAL_PORT
         assert config.baudrate == 38400
         assert config.header_timeout == 0.5
-        assert config.body_timeout == 2.0
+        assert config.body_timeout == 0.3
         assert config.checksum_timeout == 0.5
         assert config.max_retries == 3
         assert config.initial_retry_delay == 0.1
         assert config.retry_backoff_multiplier == 2.0
-        assert config.inter_command_gap == 0.0
+        assert config.inter_command_gap == 0.1
 
     def test_invalid_baudrate(self):
         """Test that invalid baudrate raises ValueError."""

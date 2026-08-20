@@ -57,24 +57,16 @@ def _setup(
     return reader, writer
 
 
-def test_unrelated_response_is_discarded_without_resend(monkeypatch):
-    reader, _ = _setup(monkeypatch)
-    sends = 0
-    reads = 0
+def test_unrelated_response_retries_same_request(monkeypatch):
+    _setup(monkeypatch)
+    responses = [_frame("RQ", "ER"), _frame("RQ", "ID")]
+    sent: list[bytes] = []
 
-    async def send_once(_reader, _writer, _message):
-        nonlocal sends
-        sends += 1
-        return _frame("RQ", "ER")
+    async def send(_reader, _writer, message):
+        sent.append(message[1:5])
+        return responses.pop(0)
 
-    async def read_expected(actual_reader):
-        nonlocal reads
-        assert actual_reader is reader
-        reads += 1
-        return _frame("RQ", "ID")
-
-    monkeypatch.setattr(serial_io, "_fetch_with_timeout", send_once)
-    monkeypatch.setattr(serial_io, "_read_response_with_timeout", read_expected)
+    monkeypatch.setattr(serial_io, "_fetch_with_timeout", send)
 
     async def run():
         return await serial_io.fetch(
@@ -85,24 +77,19 @@ def test_unrelated_response_is_discarded_without_resend(monkeypatch):
 
     response = asyncio.run(run())
     assert serial_io._response_codes(response) == ("RQ", "ID")
-    assert sends == 1
-    assert reads == 1
+    assert sent == [b"RQID", b"RQID"]
 
 
 def test_mismatch_log_contains_lossless_frame_and_wire_timing(monkeypatch, caplog):
-    reader, _ = _setup(monkeypatch)
+    _setup(monkeypatch)
     wrong = _frame("RQ", "ID", b"CLOSEDLOCKED")
     expected = _frame("RQ", "IW", b"+00000" * 10)
+    responses = [wrong, expected]
 
-    async def send_once(_reader, _writer, _message):
-        return wrong
+    async def send(_reader, _writer, _message):
+        return responses.pop(0)
 
-    async def read_expected(actual_reader):
-        assert actual_reader is reader
-        return expected
-
-    monkeypatch.setattr(serial_io, "_fetch_with_timeout", send_once)
-    monkeypatch.setattr(serial_io, "_read_response_with_timeout", read_expected)
+    monkeypatch.setattr(serial_io, "_fetch_with_timeout", send)
 
     caplog.set_level(logging.WARNING, logger=serial_io.logger.name)
 
@@ -126,6 +113,8 @@ def test_mismatch_log_contains_lossless_frame_and_wire_timing(monkeypatch, caplo
     assert "rx_shape=known-response-size" in mismatch
     assert "rx_checksum=valid" in mismatch
     assert f"rx_hex={wrong.hex().upper()}" in mismatch
+    assert "retrying same request" in mismatch
+    assert "attempt=2/3" in recovered
     assert "discarded_total=1" in recovered
     assert "rx_len=67" in recovered
 
@@ -143,23 +132,26 @@ def test_frame_diagnostics_distinguishes_echo_and_corruption():
     assert f"rx_hex={corrupted.hex().upper()}" in corrupted_diagnostics
 
 
-def test_transaction_keeps_serial_ownership_while_waiting_for_match(monkeypatch):
+def test_transaction_keeps_serial_ownership_across_mismatch_retry(monkeypatch):
     _setup(monkeypatch)
-    allow_expected = asyncio.Event()
+    retry_started = asyncio.Event()
+    allow_retry_response = asyncio.Event()
     sent: list[bytes] = []
+    rqid_attempts = 0
 
     async def send(_reader, _writer, message):
+        nonlocal rqid_attempts
         sent.append(message[1:5])
         if message[1:5] == b"RQID":
-            return _frame("RQ", "ER")
+            rqid_attempts += 1
+            if rqid_attempts == 1:
+                return _frame("RQ", "ER")
+            retry_started.set()
+            await allow_retry_response.wait()
+            return _frame("RQ", "ID")
         return _frame("RQ", "IW")
 
-    async def read_expected(_reader):
-        await allow_expected.wait()
-        return _frame("RQ", "ID")
-
     monkeypatch.setattr(serial_io, "_fetch_with_timeout", send)
-    monkeypatch.setattr(serial_io, "_read_response_with_timeout", read_expected)
 
     async def run():
         first = asyncio.create_task(
@@ -169,7 +161,8 @@ def test_transaction_keeps_serial_ownership_while_waiting_for_match(monkeypatch)
                 expected_subcommand="ID",
             )
         )
-        await asyncio.sleep(0)
+        await retry_started.wait()
+        assert sent == [b"RQID", b"RQID"]
         second = asyncio.create_task(
             serial_io.fetch(
                 b"\x02RQIW\x03\x00",
@@ -178,12 +171,25 @@ def test_transaction_keeps_serial_ownership_while_waiting_for_match(monkeypatch)
             )
         )
         await asyncio.sleep(0)
-        assert sent == [b"RQID"]
-        allow_expected.set()
+        assert sent == [b"RQID", b"RQID"]
+        allow_retry_response.set()
         await asyncio.gather(first, second)
 
     asyncio.run(run())
-    assert sent == [b"RQID", b"RQIW"]
+    assert sent == [b"RQID", b"RQID", b"RQIW"]
+
+
+def test_fetch_without_expected_codes_returns_response(monkeypatch):
+    _setup(monkeypatch)
+    expected = _frame("RQ", "ID")
+
+    async def send(_reader, _writer, _message):
+        return expected
+
+    monkeypatch.setattr(serial_io, "_fetch_with_timeout", send)
+
+    response = asyncio.run(serial_io.fetch(_frame("RQ", "ID")))
+    assert response == expected
 
 
 def test_wire_min_gap_applies_to_timeout_retry(monkeypatch):

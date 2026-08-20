@@ -65,11 +65,10 @@ async def _send_command(
     with PerformanceLogger(logger, "command", cmd=f"{command.value}/{subcommand.value}"):
         # Build request message
         request_message = build_request(command.value, subcommand.value, data)
-        # response matching과 timeout 재시도는 하나의 serial ownership 안에서
-        # 수행한다. 다른 명령의 지연 response를 받았다고 즉시 재전송하면 논리
-        # 명령들이 서로 끼어들며 ID/IW/ER 응답을 계속 교환하는 livelock이 된다.
-        # RQIW에는 실제 wire 재전송까지 min gap을 적용해 firmware sign 손상을
-        # 방지한다.
+        # response matching과 재시도는 하나의 serial ownership 안에서
+        # 수행한다. mismatch 시 동일 요청을 재전송하되 다른 command가 중간에
+        # 끼어들지 못한다. RQIW에는 실제 wire 재전송까지 min gap을 적용해
+        # firmware sign 손상을 방지한다.
         response_message = await fetch(
             request_message,
             expected_command=command.value,
