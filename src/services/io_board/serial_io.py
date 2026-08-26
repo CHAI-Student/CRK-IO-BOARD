@@ -19,6 +19,10 @@ from core.config import SerialModel
 from core.logging_config import PerformanceLogger, get_logger, log_payload
 from exceptions import ErrorCode, ProtocolError, SerialCommunicationError
 
+# fetch()가 checksum을 자체 검증할 때 쓰는 완전한 frame의 최소 길이
+# (STX + CMD/SUBCMD 4바이트 + ETX + LRC)
+_MIN_FRAME_LENGTH = 7
+
 logger = get_logger(__name__)
 
 # 전역 serial 설정과 mutex (포트 접근 직렬화)
@@ -278,6 +282,24 @@ def _xor_checksum(data: bytes) -> int:
     return reduce(lambda left, right: left ^ right, data, 0)
 
 
+def _response_checksum_valid(response: bytes) -> bool:
+    """완전한 응답 frame의 checksum(XOR)이 유효한지 검사한다.
+
+    CMD/SUBCMD mismatch와 달리 checksum 손상은 fetch()가 지금까지 자체
+    검증하지 않고 그대로 성공 처리해왔다 (parse_response()가 retry 루프
+    밖에서 뒤늦게 검증) — 전기적 노이즈로 DATA 바이트가 손상되면 retry
+    기회 없이 그대로 실패한다. fetch() 내부에서 미리 걸러 동일한
+    retry/backoff 경로를 타게 한다.
+    """
+    if (
+        len(response) < _MIN_FRAME_LENGTH
+        or response[0:1] != b"\x02"
+        or response[-2:-1] != b"\x03"
+    ):
+        return False
+    return _xor_checksum(response[1:-1]) == response[-1]
+
+
 def _frame_diagnostics(response: bytes) -> str:
     """정식 parser 전 mismatch frame의 무손실 진단 문자열을 만든다.
 
@@ -449,6 +471,47 @@ async def fetch(
                         )
                         response = await _fetch_with_timeout(reader, writer, message)
                         _last_rx_complete_time = asyncio.get_running_loop().time()
+
+                        # checksum이 깨진 frame(전기적 노이즈로 DATA 손상)은 CMD/SUBCMD가
+                        # 멀쩡해 보여도 폐기하고 같은 retry/backoff 경로로 재전송한다 —
+                        # 그렇지 않으면 parse_response()가 retry 루프 밖에서 뒤늦게
+                        # checksum을 검증해 단 1회 실패로 바로 포기하게 된다.
+                        if not _response_checksum_valid(response):
+                            unexpected += 1
+                            discarded_total += 1
+
+                            rx_after_tx_ms = (
+                                (asyncio.get_running_loop().time() - tx_time) * 1000
+                                if tx_time is not None
+                                else float("nan")
+                            )
+                            logger.warning(
+                                "Checksum validation failed: "
+                                f"txn={transaction_id} "
+                                f"attempt={attempt}/{config.max_retries} "
+                                f"expected={expected_command}/{expected_subcommand} "
+                                f"rx_after_tx_ms={rx_after_tx_ms:.3f} "
+                                f"{_tx_gap_diagnostics(previous_tx, tx_time)} "
+                                f"{_rx_to_tx_gap_diagnostics(previous_rx_time, tx_time)} "
+                                f"{_frame_diagnostics(response)}. "
+                                "Discarding corrupted response and retrying same request..."
+                            )
+
+                            if attempt < config.max_retries:
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= config.retry_backoff_multiplier
+                                continue
+
+                            raise ProtocolError(
+                                "Response checksum invalid after "
+                                f"{config.max_retries} attempts",
+                                ErrorCode.PROTOCOL_CHECKSUM_MISMATCH,
+                                {
+                                    "command": expected_command,
+                                    "subcommand": expected_subcommand,
+                                    "attempts": config.max_retries,
+                                },
+                            )
 
                         # 다른 logical command의 응답이면 폐기하고 같은 serial
                         # ownership을 유지한 채 동일 요청을 재전송한다.
