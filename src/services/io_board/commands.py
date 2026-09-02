@@ -326,7 +326,13 @@ async def get_loadcells() -> List[str]:
                 RequestSubcommand.LOADCELL_WEIGHTS,
                 {}
             )
-            result = sanitize_loadcells(list(response.DATA.LOADCELLS))
+            device_values = list(response.DATA.LOADCELLS)
+            result = sanitize_loadcells(device_values)
+            if result != device_values:
+                logger.info(
+                    "Loadcell sanitizer corrected frame: "
+                    f"device_values={device_values} sanitized_values={result}"
+                )
             _loadcell_cache = list(result)
             _loadcell_cache_ts = time.monotonic()
             logger.debug(f"Loadcell values retrieved: {result}")

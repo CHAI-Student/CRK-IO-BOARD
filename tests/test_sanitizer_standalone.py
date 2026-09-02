@@ -49,6 +49,22 @@ class TestSignGlitchCorrection:
             out = s.sanitize(glitched, now=0.1 * (k + 1))
             assert out == base, f"walking glitch at ch{ch} not corrected"
 
+    def test_captured_sign_reversal_is_corrected_after_large_spike(self):
+        # 현장 캡처: ch4의 +240 단발 스파이크 뒤 -115가 안정된 후 +115로
+        # 반전됐다. 큰 스파이크 자체는 통과하지만 등크기 부호 반전은 복원한다.
+        s = make()
+        s.sanitize(frame("+00000", "+00000", "+00000", "+00000", "+00005"), now=0.0)
+        s.sanitize(frame("+00000", "+00000", "+00000", "+00000", "+00240"), now=0.8)
+        s.sanitize(frame("+00000", "+00000", "+00000", "+00000", "-00115"), now=1.6)
+        s.sanitize(frame("+00000", "+00000", "+00000", "+00000", "-00115"), now=2.4)
+
+        out = s.sanitize(
+            frame("+00000", "+00000", "+00000", "+00000", "+00115"),
+            now=3.2,
+        )
+
+        assert out[4] == "-00115"
+
     def test_persistent_flip_is_relatched(self):
         # 반전이 relatch_frames(3) 연속 지속되면 진짜 변화로 수용
         s = make()
