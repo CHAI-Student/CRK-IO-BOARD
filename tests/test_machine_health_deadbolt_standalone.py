@@ -10,6 +10,7 @@ from services.io_board.io_types import DeadboltAction, DeadboltState, DoorState
 class _ErrorState:
     def __init__(self):
         self.actions: list[DeadboltAction] = []
+        self.deadbolt_apply_timeout_seconds = 5.0
 
     async def door_error(self) -> bool:
         return True
@@ -116,3 +117,32 @@ def test_deadbolt_lock_covers_command_settle_and_status_verification(monkeypatch
         "MCDC:CLOSE",
         "RQID:LOCKED",
     ]
+
+
+def test_deadbolt_waits_for_delayed_sensor_confirmation(monkeypatch):
+    error_state = _ErrorState()
+    status_checks = 0
+
+    async def set_deadbolt(_action: DeadboltAction):
+        return DeadboltState.LOCKED
+
+    async def get_status():
+        nonlocal status_checks
+        status_checks += 1
+        state = DeadboltState.UNLOCK if status_checks == 3 else DeadboltState.LOCKED
+        return {"door": DoorState.CLOSED, "deadbolt": state}
+
+    monkeypatch.setattr(machine.commands, "set_deadbolt", set_deadbolt)
+    monkeypatch.setattr(machine.commands, "get_status", get_status)
+    monkeypatch.setattr(machine, "DEADBOLT_SETTLE_SECONDS", 0)
+    monkeypatch.setattr(machine, "DEADBOLT_STATUS_POLL_SECONDS", 0)
+
+    response = asyncio.run(
+        machine.set_deadbolt(
+            _request(error_state, lock=asyncio.Lock()),
+            machine.DeadboltRequest(action=DeadboltAction.OPEN),
+        )
+    )
+
+    assert response.state == DeadboltState.UNLOCK
+    assert status_checks == 3

@@ -49,6 +49,7 @@ LOADCELL_PATTERN = re.compile(r"^(\+|-)\d{5}$")
 # MCDC 응답은 명령 echo이므로 actuator의 실제 상태 반영은 잠시 기다린 뒤
 # RQID로 확인한다. 테스트에서는 이 상수만 낮춰 동시성 검증을 빠르게 한다.
 DEADBOLT_SETTLE_SECONDS = 0.5
+DEADBOLT_STATUS_POLL_SECONDS = 0.1
 
 
 @router.get(
@@ -194,12 +195,25 @@ async def set_deadbolt(request: Request, deadbolt_request: DeadboltRequest) -> D
         )
         await commands.set_deadbolt(deadbolt_request.action)
 
-        # 상태 변화가 반영될 시간을 확보하기 위한 지연
+        expected_state = (
+            DeadboltState.UNLOCK
+            if deadbolt_request.action == DeadboltAction.OPEN
+            else DeadboltState.LOCKED
+        )
+        # MCDC의 echo가 아닌 RQID 센서 상태를 확인한다. 첫 settle 이후에도
+        # actuator가 이동 중이면 health 적용 제한시간까지 확인해, 호출자가
+        # 물리적 잠금 해제 전에 문 열기를 시도하지 않도록 한다.
         await asyncio.sleep(DEADBOLT_SETTLE_SECONDS)
-
-        # 실제 deadbolt 상태를 IO status로 재확인해 반환
-        io_status = await commands.get_status()
-        return DeadboltResponse(state=io_status["deadbolt"])
+        deadline = (
+            asyncio.get_running_loop().time()
+            + error_state_management_service.deadbolt_apply_timeout_seconds
+        )
+        while True:
+            io_status = await commands.get_status()
+            state = io_status["deadbolt"]
+            if state == expected_state or asyncio.get_running_loop().time() >= deadline:
+                return DeadboltResponse(state=state)
+            await asyncio.sleep(DEADBOLT_STATUS_POLL_SECONDS)
 
 
 ########
