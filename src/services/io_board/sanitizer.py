@@ -200,3 +200,9 @@ def sanitize_loadcells(values: list[str]) -> list[str]:
     if _sanitizer is None:
         return values
     return _sanitizer.sanitize(values)
+
+
+def reset_sanitizer() -> None:
+    """보정 또는 재연결 후 sanitizer의 이전 판독값을 폐기한다."""
+    if _sanitizer is not None:
+        _sanitizer.reset()

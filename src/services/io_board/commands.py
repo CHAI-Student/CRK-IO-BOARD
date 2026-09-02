@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from exceptions import DeviceError, ErrorCode, ProtocolError, ValidationError
 from core.logging_config import PerformanceLogger, get_logger
 from services.io_board.protocol import build_request, parse_response
-from services.io_board.sanitizer import sanitize_loadcells
+from services.io_board.sanitizer import reset_sanitizer, sanitize_loadcells
 from services.io_board.serial_io import fetch
 from services.io_board.io_types import (
     CommandType,
@@ -173,6 +173,7 @@ async def calibrate() -> None:
             ManagementSubcommand.CALIBRATE,
             {}
         )
+        reset_loadcell_processing()
         logger.info("Loadcells calibrated")
 
 
@@ -291,6 +292,15 @@ def configure_loadcell_throttle(min_gap: float) -> None:
     logger.info(
         f"Loadcell throttle {'enabled: min gap %.2fs' % min_gap if min_gap > 0 else 'disabled'}"
     )
+
+
+def reset_loadcell_processing() -> None:
+    """보정 이후 이전 판독값과 throttle cache를 폐기한다."""
+    global _loadcell_cache, _loadcell_cache_ts
+    _loadcell_cache = None
+    _loadcell_cache_ts = 0.0
+    reset_sanitizer()
+    logger.info("Loadcell sanitizer state and throttle cache reset after calibration")
 
 
 async def get_loadcells() -> List[str]:

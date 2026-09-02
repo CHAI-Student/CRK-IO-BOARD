@@ -98,6 +98,34 @@ def test_concurrent_calls_single_serial_request(monkeypatch):
     assert all(r == results[0] for r in results)
 
 
+def test_calibration_resets_loadcell_processing_state(monkeypatch):
+    counter = {"n": 0}
+    sanitizer_reset = False
+
+    async def fake_send(command, subcommand, data):
+        counter["n"] += 1
+        return SimpleNamespace(DATA=SimpleNamespace(LOADCELLS=["+00001"] * 10))
+
+    def fake_reset_sanitizer():
+        nonlocal sanitizer_reset
+        sanitizer_reset = True
+
+    monkeypatch.setattr(commands, "_session", fake_session)
+    monkeypatch.setattr(commands, "_send_command", fake_send)
+    monkeypatch.setattr(commands, "reset_sanitizer", fake_reset_sanitizer)
+    commands.configure_loadcell_throttle(10.0)
+
+    async def run():
+        await commands.get_loadcells()
+        await commands.calibrate()
+        await commands.get_loadcells()
+
+    asyncio.run(run())
+
+    assert sanitizer_reset is True
+    assert counter["n"] == 3  # first RQIW, MCLZ, fresh RQIW after calibration
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

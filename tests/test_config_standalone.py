@@ -144,10 +144,13 @@ class TestPollingAndSanitizeDefaults:
         assert config.loadcells_poll_interval == 0.8
         assert config.loadcells_min_request_gap == 0.75
         assert config.io_status_poll_interval == 0.5
+        assert config.io_status_poll_interval_while_loadcells_active == 2.0
 
     def test_polling_validation(self):
         with pytest.raises(ValueError, match="Poll interval must be positive"):
             PollingModel(loadcells_poll_interval=0.0)
+        with pytest.raises(ValueError, match="Poll interval must be positive"):
+            PollingModel(io_status_poll_interval_while_loadcells_active=0.0)
         with pytest.raises(ValueError, match="Min request gap must be non-negative"):
             PollingModel(loadcells_min_request_gap=-1.0)
 

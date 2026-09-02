@@ -153,6 +153,11 @@ class PollingModel(BaseModel):
         default=0.5,
         description="IO status poll interval in seconds",
     )
+    io_status_poll_interval_while_loadcells_active: float = Field(
+        default=2.0,
+        description="IO status poll interval while loadcell subscribers are active. "
+        "Reduces RQ/ID and RQ/IW command switching without delaying direct health checks.",
+    )
     loadcells_min_request_gap: float = Field(
         default=0.75,
         description="Minimum spacing between loadcell serial requests; calls "
@@ -162,7 +167,12 @@ class PollingModel(BaseModel):
         "docs/FIRMWARE_SIGN_GLITCH_REQUEST.md). 0 disables throttling.",
     )
 
-    @field_validator("loadcells_poll_interval", "io_status_poll_interval", mode="after")
+    @field_validator(
+        "loadcells_poll_interval",
+        "io_status_poll_interval",
+        "io_status_poll_interval_while_loadcells_active",
+        mode="after",
+    )
     def validate_intervals(cls, value: float) -> float:
         if value <= 0:
             raise ValueError(f"Poll interval must be positive, got {value}")

@@ -47,6 +47,7 @@ IO 보드와의 시리얼 통신에 관한 설정입니다.
 | `IO_BOARD__SERIAL__INITIAL_RETRY_DELAY` | `0.1` | 초기 재시도 대기 시간 (초, 양수만 허용) |
 | `IO_BOARD__SERIAL__RETRY_BACKOFF_MULTIPLIER` | `2.0` | 재시도 시 대기 시간 증가 배율 (1.0 이상) |
 | `IO_BOARD__SERIAL__INTER_COMMAND_GAP` | `0.1` | 완전한 응답 수신 후 다음 실제 시리얼 송신까지의 최소 간격(초). `0`이면 명시적 gate 비활성 |
+| `IO_BOARD__POLLING__IO_STATUS_POLL_INTERVAL_WHILE_LOADCELLS_ACTIVE` | `2.0` | loadcell 구독 중 IO status 백그라운드 조회 주기(초). `/health`와 deadbolt 제어의 즉시 상태 조회에는 적용되지 않음 |
 
 펌웨어가 서로 다른 명령을 연속 처리할 때 이전 응답을 재생하는지 검증하려면
 아래처럼 값을 바꿔 A/B 테스트합니다. 이 설정은 `/loadcells`뿐 아니라 SSE,

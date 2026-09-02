@@ -7,6 +7,7 @@ CPU를 아낀다 (구독자 기반 on-demand polling).
 
 import asyncio
 import logging
+from collections.abc import Callable
 
 from .data_sources import DataSource
 from .stream_queues import StreamQueue
@@ -16,11 +17,18 @@ logger = logging.getLogger(__name__)
 class PollingService:
     """DataSource를 주기적으로 polling해 구독 queue에 broadcast하는 서비스."""
 
-    def __init__(self, data_source: DataSource, interval: float = 1.0, name: str = ""):
+    def __init__(
+        self,
+        data_source: DataSource,
+        interval: float = 1.0,
+        name: str = "",
+        interval_provider: Callable[[], float] | None = None,
+    ):
         self.data_source: DataSource = data_source
         self.subscribers: set[StreamQueue] = set()
         self.interval: float = interval
         self.name: str = name
+        self.interval_provider = interval_provider
 
         # polling 루프를 제어하는 event.
         # Unset(False) = polling 중지, Set(True) = polling 수행.
@@ -88,8 +96,13 @@ class PollingService:
 
                 # 4. INTERVAL: fetch 소요 시간을 제외하고 다음 poll까지 대기.
                 # fetch가 interval보다 오래 걸려도 음수 sleep이 되지 않게 한다.
+                interval = (
+                    self.interval_provider()
+                    if self.interval_provider is not None
+                    else self.interval
+                )
                 await asyncio.sleep(
-                    max(0.0, self.interval - (asyncio.get_event_loop().time() - timestamp))
+                    max(0.0, interval - (asyncio.get_event_loop().time() - timestamp))
                 )
 
             except Exception as e:

@@ -76,6 +76,11 @@ async def lifespan(app: FastAPI):
         data_source=io_status_data_source,
         interval=settings.polling.io_status_poll_interval,
         name="IOStatus",
+        interval_provider=lambda: (
+            settings.polling.io_status_poll_interval_while_loadcells_active
+            if loadcells_polling_service.subscribers
+            else settings.polling.io_status_poll_interval
+        ),
     )
 
     app.state.polling_services = {
